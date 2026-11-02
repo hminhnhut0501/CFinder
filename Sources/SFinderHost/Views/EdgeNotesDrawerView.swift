@@ -17,12 +17,12 @@ public struct EdgeNotesDrawerView: View {
     
     public var body: some View {
         VStack(spacing: 0) {
-            // MARK: - Header Bar
+            // MARK: - Header Bar (Clean 1-line layout)
             headerBar
             
             Divider().background(Color.white.opacity(0.08))
             
-            // MARK: - Title Input Row
+            // MARK: - Title Input Row (1-line)
             titleInputRow
             
             Divider().background(Color.white.opacity(0.06)).padding(.horizontal, 14)
@@ -36,34 +36,32 @@ public struct EdgeNotesDrawerView: View {
             
             Divider().background(Color.white.opacity(0.08))
             
-            // MARK: - Bottom Toolbar & Sync Glance
+            // MARK: - Bottom Toolbar & Sync Status
             bottomToolbar
         }
         .frame(width: 380)
         .background(
             ZStack {
-                // Liquid Glass Obsidian Base
-                Color(hex: "111216").opacity(0.92)
+                // Liquid Glass Obsidian Base (Solid clean background, no clipped shadow)
+                Color(hex: "131418").opacity(0.97)
                 
-                // Subtle radial light
+                // Subtle radial ambience
                 RadialGradient(
-                    colors: [CFinderTheme.primary.opacity(0.08), Color.clear],
+                    colors: [CFinderTheme.primary.opacity(0.07), Color.clear],
                     center: .topTrailing,
                     startRadius: 10,
-                    endRadius: 280
+                    endRadius: 260
                 )
             }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(
-                    controller.isPinned ? Color(hex: "F59E0B").opacity(0.35) : Color.white.opacity(0.12),
+                    controller.isPinned ? Color(hex: "F59E0B").opacity(0.4) : Color.white.opacity(0.10),
                     lineWidth: 1
                 )
         )
-        .shadow(color: Color.black.opacity(0.45), radius: 24, x: -6, y: 0)
-        .padding(.leading, 8)
         .onHover { isInside in
             if isInside {
                 controller.handleMouseEnteredDrawer()
@@ -77,101 +75,101 @@ public struct EdgeNotesDrawerView: View {
     
     private var headerBar: some View {
         HStack(spacing: 8) {
-            // Pin Toggle Button
-            Button(action: {
-                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
-                    controller.isPinned.toggle()
-                }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: controller.isPinned ? "pin.fill" : "pin")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text(controller.isPinned ? "Đã ghim" : "Ghim")
-                        .font(.system(size: 10.5, weight: .medium))
-                }
-                .foregroundColor(controller.isPinned ? Color(hex: "F59E0B") : .white.opacity(0.6))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4.5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(controller.isPinned ? Color(hex: "F59E0B").opacity(0.16) : Color.white.opacity(0.05))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .stroke(controller.isPinned ? Color(hex: "F59E0B").opacity(0.3) : Color.clear, lineWidth: 0.5)
-                        )
-                )
-            }
-            .buttonStyle(.plain)
-            .help(controller.isPinned ? "Đang ghim (Cửa sổ không tự ẩn khi rê chuột ra ngoài)" : "Ghim cửa sổ để không tự ẩn")
-            
-            // Mode Switcher: Văn bản / Việc cần làm
+            // Mode Switcher (Strictly 1-line Segmented Pill)
             HStack(spacing: 2) {
-                modeButton(title: "Văn bản", icon: "doc.text", mode: .text)
-                modeButton(title: "Việc cần làm", icon: "checklist", mode: .checklist)
+                modeSegmentButton(title: "Ghi chú", icon: "doc.text", mode: .text)
+                modeSegmentButton(title: "Việc làm", icon: "checklist", mode: .checklist)
             }
-            .padding(2)
+            .padding(2.5)
             .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.white.opacity(0.05)))
             
             Spacer()
             
-            // Apple Notes Button
-            Button(action: {
-                syncEngine.performSync(note: storage.currentNote)
-                syncEngine.openAppleNotesApp()
-            }) {
-                HStack(spacing: 3) {
-                    Image(systemName: "apple.logo")
-                        .font(.system(size: 9.5))
-                    Text("Notes")
-                        .font(.system(size: 10, weight: .semibold))
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 8))
+            // Clean Icon Buttons Row
+            HStack(spacing: 6) {
+                // 1. Pin Toggle (Icon only)
+                Button(action: {
+                    withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                        controller.isPinned.toggle()
+                    }
+                }) {
+                    Image(systemName: controller.isPinned ? "pin.fill" : "pin")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(controller.isPinned ? Color(hex: "F59E0B") : .white.opacity(0.55))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(controller.isPinned ? Color(hex: "F59E0B").opacity(0.18) : Color.white.opacity(0.04))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(controller.isPinned ? Color(hex: "F59E0B").opacity(0.35) : Color.clear, lineWidth: 0.5)
+                                )
+                        )
                 }
-                .foregroundColor(CFinderTheme.primaryLight)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4.5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(CFinderTheme.primary.opacity(0.15))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(CFinderTheme.primary.opacity(0.3), lineWidth: 0.5))
-                )
-            }
-            .buttonStyle(.plain)
-            .help("Mở thư mục CFinder Quick Notes trong Apple Notes")
-            
-            // New Note Button (+)
-            Button(action: {
-                withAnimation {
-                    storage.createNewNote(mode: storage.currentNote.mode)
+                .buttonStyle(.plain)
+                .help(controller.isPinned ? "Đang ghim (Cửa sổ không tự ẩn khi rê chuột ra ngoài)" : "Ghim cửa sổ để không tự ẩn")
+                
+                // 2. Apple Notes Sync / Open (Icon only)
+                Button(action: {
+                    syncEngine.performSync(note: storage.currentNote)
+                    syncEngine.openAppleNotesApp()
+                }) {
+                    Image(systemName: "applelogo")
+                        .font(.system(size: 12))
+                        .foregroundColor(CFinderTheme.primaryLight.opacity(0.9))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(CFinderTheme.primary.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .stroke(CFinderTheme.primary.opacity(0.25), lineWidth: 0.5)
+                                )
+                        )
                 }
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.white.opacity(0.75))
-                    .frame(width: 24, height: 24)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.06)))
+                .buttonStyle(.plain)
+                .help("Mở thư mục CFinder Quick Notes trong Apple Notes")
+                
+                // 3. New Note (+)
+                Button(action: {
+                    withAnimation {
+                        storage.createNewNote(mode: storage.currentNote.mode)
+                    }
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.75))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.white.opacity(0.05))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Tạo ghi chú mới")
+                
+                // 4. Close (✕)
+                Button(action: {
+                    controller.hideDrawer(force: true)
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.white.opacity(0.55))
+                        .frame(width: 26, height: 26)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.white.opacity(0.04))
+                        )
+                }
+                .buttonStyle(.plain)
+                .help("Đóng ngăn kéo (Esc)")
             }
-            .buttonStyle(.plain)
-            .help("Tạo ghi chú mới")
-            
-            // Close Button (✕)
-            Button(action: {
-                controller.hideDrawer(force: true)
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .frame(width: 24, height: 24)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04)))
-            }
-            .buttonStyle(.plain)
-            .help("Đóng ngăn kéo (Esc)")
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
     
-    private func modeButton(title: String, icon: String, mode: QuickNoteMode) -> some View {
+    private func modeSegmentButton(title: String, icon: String, mode: QuickNoteMode) -> some View {
         let isSelected = storage.currentNote.mode == mode
         return Button(action: {
             withAnimation(.spring(response: 0.2, dampingFraction: 0.8)) {
@@ -180,15 +178,17 @@ public struct EdgeNotesDrawerView: View {
                 syncEngine.requestSync(note: storage.currentNote)
             }
         }) {
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: icon)
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 10))
                 Text(title)
-                    .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundColor(isSelected ? .white : .white.opacity(0.55))
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3.5)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4.5)
             .background(
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(isSelected ? Color.white.opacity(0.12) : Color.clear)
@@ -203,12 +203,13 @@ public struct EdgeNotesDrawerView: View {
         HStack(spacing: 8) {
             Image(systemName: "square.and.pencil")
                 .font(.system(size: 12))
-                .foregroundColor(CFinderTheme.primaryLight.opacity(0.7))
+                .foregroundColor(CFinderTheme.primaryLight.opacity(0.8))
             
             TextField("Tiêu đề ghi chú...", text: $storage.currentNote.title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white)
                 .textFieldStyle(.plain)
+                .lineLimit(1)
                 .focused($isTitleFocused)
                 .onChange(of: storage.currentNote.title) { _ in
                     storage.requestAutoSave()
@@ -225,10 +226,11 @@ public struct EdgeNotesDrawerView: View {
                         .foregroundColor(.white.opacity(0.3))
                 }
                 .buttonStyle(.plain)
+                .help("Xoá tiêu đề")
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
     }
     
     // MARK: - Text Mode Editor
@@ -239,8 +241,8 @@ public struct EdgeNotesDrawerView: View {
                 Text("Gõ nội dung ghi chú ở đây...\n(Tự động lưu ngay lập tức • Hỗ trợ phím tắt ⌥N)")
                     .font(.system(size: 12.5))
                     .foregroundColor(.white.opacity(0.28))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 14)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                     .allowsHitTesting(false)
             }
             
@@ -268,10 +270,11 @@ public struct EdgeNotesDrawerView: View {
                     .font(.system(size: 13))
                     .foregroundColor(CFinderTheme.primaryLight)
                 
-                TextField("Thêm việc cần làm (Bấm Enter để thêm)...", text: $newChecklistText)
+                TextField("Thêm việc cần làm (nhấn Enter)...", text: $newChecklistText)
                     .font(.system(size: 12))
                     .foregroundColor(.white)
                     .textFieldStyle(.plain)
+                    .lineLimit(1)
                     .focused($isChecklistInputFocused)
                     .onSubmit {
                         addChecklistItem()
@@ -343,6 +346,7 @@ public struct EdgeNotesDrawerView: View {
                 .strikethrough(item.wrappedValue.isCompleted, color: .white.opacity(0.4))
                 .foregroundColor(item.wrappedValue.isCompleted ? .white.opacity(0.4) : .white.opacity(0.9))
                 .textFieldStyle(.plain)
+                .lineLimit(1)
                 .onChange(of: item.wrappedValue.text) { _ in
                     storage.requestAutoSave()
                     syncEngine.requestSync(note: storage.currentNote)
@@ -395,13 +399,14 @@ public struct EdgeNotesDrawerView: View {
                 Text(syncEngine.isSyncing ? "Đang lưu..." : syncEngine.syncStatusText)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.white.opacity(0.55))
+                    .lineLimit(1)
             }
             
             Spacer()
             
             // Format quick shortcuts (for Text mode)
             if storage.currentNote.mode == .text {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     formatButton(label: "B", snippet: "****")
                     formatButton(label: "I", snippet: "**")
                     formatButton(label: "•", snippet: "\n• ")
@@ -411,11 +416,13 @@ public struct EdgeNotesDrawerView: View {
                 Text("\(storage.currentNote.completedChecklistCount)/\(storage.currentNote.checklist.count) hoàn thành")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(Color(hex: "10B981"))
+                    .lineLimit(1)
             }
             
             Text("• \(storage.currentNote.wordCount) từ")
                 .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.4))
+                .lineLimit(1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
