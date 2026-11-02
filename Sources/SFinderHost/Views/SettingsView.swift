@@ -310,6 +310,38 @@ public struct SettingsView: View {
                 .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.04)))
             }
             
+            // Edge Notes Settings
+            VStack(alignment: .leading, spacing: 10) {
+                Text("GHI CHÚ MÉP MÀN HÌNH (EDGE NOTES)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+                
+                VStack(spacing: 0) {
+                    SettingToggleRow(
+                        title: "Rê chuột mép phải để mở (Hover to Peek)",
+                        subtitle: "Mở ngăn kéo ghi chú tức thì khi chạm mép phải màn hình (hoặc ⌥N)",
+                        icon: "note.text",
+                        isOn: Binding(
+                            get: { EdgeHotspotController.shared.isEdgeTriggerEnabled },
+                            set: { EdgeHotspotController.shared.isEdgeTriggerEnabled = $0 }
+                        )
+                    ) { _ in }
+                    
+                    Divider().background(Color.white.opacity(0.06)).padding(.horizontal, 16)
+                    
+                    SettingToggleRow(
+                        title: "Đồng bộ Apple Notes (iCloud)",
+                        subtitle: "Lưu vào thư mục 'CFinder Quick Notes' trong Notes.app",
+                        icon: "applelogo",
+                        isOn: Binding(
+                            get: { AppleNotesSyncEngine.shared.isAutoSyncEnabled },
+                            set: { AppleNotesSyncEngine.shared.isAutoSyncEnabled = $0 }
+                        )
+                    ) { _ in }
+                }
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.04)))
+            }
+            
             // App About & Version Info
             VStack(spacing: 12) {
                 Image(systemName: "apple.terminal.on.rectangle")

@@ -111,6 +111,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ) { _ in
             ScreenRecorderEngine.shared.toggleRecording()
         }
+        
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.sfinder.toggleEdgeNotes"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            EdgeNotesWindowController.shared.toggleDrawer()
+        }
+        
+        // Start Edge Quick Notes screen edge monitor
+        EdgeHotspotController.shared.startMonitoring()
     }
     
     @objc func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
@@ -202,6 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             HostActionCoordinator.shared.presentOCRHistory()
         } else if url.host == "batch-rename" || url.path.contains("batch-rename") {
             HostActionCoordinator.shared.presentBatchRename(urls: [])
+        } else if url.host == "notes" || url.path.contains("notes") || url.host == "edge-notes" {
+            EdgeNotesWindowController.shared.toggleDrawer()
         } else if url.host == "wake-toggle" || url.path.contains("wake-toggle") {
             PowerManager.shared.toggleQuickSession()
         } else if url.host == "undo" || url.path.contains("undo") {
@@ -415,6 +428,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Global Hotkeys
     
     private var carbonRecordHotKeyRef: EventHotKeyRef?
+    private var carbonNotesHotKeyRef: EventHotKeyRef?
+    
+    private func registerNotesCarbonHotKey() {
+        if let ref = carbonNotesHotKeyRef {
+            UnregisterEventHotKey(ref)
+            carbonNotesHotKeyRef = nil
+        }
+        let hotKeyID = EventHotKeyID(signature: FourCharCode(0x53464E54), id: 3) // 'SFNT'
+        let status = RegisterEventHotKey(45, UInt32(optionKey), hotKeyID, GetApplicationEventTarget(), 0, &carbonNotesHotKeyRef)
+        NSLog("[SFinderHost] Registered Notes Carbon HotKey ⌥N (status=%d)", status)
+    }
     
     private func registerRecordCarbonHotKey() {
         if let ref = carbonRecordHotKeyRef {
@@ -479,6 +503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 1. Carbon Global HotKey: Dynamic according to currentPreset — 100% reliable system-wide
         registerCarbonHotKey()
         registerRecordCarbonHotKey()
+        registerNotesCarbonHotKey()
         
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { (handler, event, userData) -> OSStatus in
@@ -493,6 +518,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else if hkID.signature == FourCharCode(0x53465243) { // 'SFRC'
                 DispatchQueue.main.async {
                     ScreenRecorderEngine.shared.toggleRecording()
+                }
+            } else if hkID.signature == FourCharCode(0x53464E54) { // 'SFNT'
+                DispatchQueue.main.async {
+                    EdgeNotesWindowController.shared.toggleDrawer()
                 }
             }
             return noErr
@@ -548,6 +577,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     ScreenRecorderEngine.shared.toggleRecording()
                 }
             }
+            // ⌥N: Edge Quick Notes (Ghi chú mép màn hình)
+            else if flags == [.option] && (event.keyCode == 45 || key == "n") {
+                DispatchQueue.main.async {
+                    EdgeNotesWindowController.shared.toggleDrawer()
+                }
+            }
             // ⌃⌥B / ⌥B: Toggle Menu Bar Icons (Ẩn/Hiện icon thanh menu)
             else if (flags == [.control, .option] || flags == [.option]) && (event.keyCode == 11 || key == "b") {
                 DispatchQueue.main.async {
@@ -597,6 +632,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else if flags == [.option] && (event.keyCode == 15 || key == "r") {
                 DispatchQueue.main.async {
                     ScreenRecorderEngine.shared.toggleRecording()
+                }
+                return nil
+            } else if flags == [.option] && (event.keyCode == 45 || key == "n") {
+                DispatchQueue.main.async {
+                    EdgeNotesWindowController.shared.toggleDrawer()
                 }
                 return nil
             } else if (flags == [.control, .option] || flags == [.option]) && (event.keyCode == 11 || key == "b") {

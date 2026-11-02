@@ -415,6 +415,9 @@ public final class HostActionCoordinator: ObservableObject {
         if let win = renameWindowController?.window, win.isVisible {
             windowsToHide.append(win)
         }
+        if EdgeNotesWindowController.shared.isVisible {
+            EdgeNotesWindowController.shared.hideDrawer(force: true)
+        }
         
         self.hiddenWindowsForCapture = windowsToHide
         for win in windowsToHide {

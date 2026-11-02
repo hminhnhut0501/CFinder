@@ -471,6 +471,14 @@ public struct MenuBarControlCenterView: View {
                     HostActionCoordinator.shared.presentScrollingCapture()
                 }
             }
+            
+            // Edge Quick Notes
+            actionButton(title: "Ghi chú", icon: "note.text", badge: "⌥N") {
+                onDismissMenu()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    EdgeNotesWindowController.shared.toggleDrawer()
+                }
+            }
         }
     }
     

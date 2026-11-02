@@ -11,6 +11,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
     case recorder = "recorder"
     case wake = "wake"
     case rename = "rename"
+    case notes = "notes"
     case snap = "snap"
     case menubar = "menubar"
     case monitor = "monitor"
@@ -27,6 +28,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         case .recorder: return "Quay màn hình"
         case .wake: return "Chống ngủ Mac"
         case .rename: return "Đổi tên tệp"
+        case .notes: return "Ghi chú mép"
         case .snap: return "Snap Areas"
         case .menubar: return "Menu Bar Icons"
         case .monitor: return "Theo dõi hệ thống"
@@ -43,6 +45,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         case .recorder: return "Cấu hình quay video 60/120fps Retina, thu âm thanh máy tính, micro và hiệu ứng chuột"
         case .wake: return "Quản lý giữ thức CPU, cho phép tắt màn hình và tự ngắt bảo vệ khi pin yếu"
         case .rename: return "Thiết lập quy tắc đổi tên tệp ưu tiên trên Finder và nhật ký hoàn tác (⌘Z) an toàn"
+        case .notes: return "Rê chuột mép phải là mở, gõ tự lưu, đồng bộ Apple Notes  và phím tắt ⌥N"
         case .snap: return "Kéo mép & góc màn hình để chia đôi, chia tư và tuỳ biến từng màn hình"
         case .menubar: return "Giấu bớt biểu tượng thanh menu, tự động ẩn lại sau khi dùng"
         case .monitor: return "Nhiệt độ CPU, GPU; mức dùng CPU, GPU, RAM và áp lực bộ nhớ"
@@ -59,6 +62,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         case .recorder: return "record.circle.fill"
         case .wake: return "bolt.fill"
         case .rename: return "pencil.and.list.clipboard"
+        case .notes: return "note.text"
         case .snap: return "rectangle.split.2x2"
         case .menubar: return "menubar.rectangle"
         case .monitor: return "gauge.with.dots.needle.bottom.50percent"
@@ -75,6 +79,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         case .recorder: return Color(hex: "FB7185")
         case .wake: return Color(hex: "F59E0B")
         case .rename: return Color(hex: "38BDF8")
+        case .notes: return Color(hex: "F59E0B")
         case .snap: return Color.white.opacity(0.85)
         case .menubar: return Color.white.opacity(0.85)
         case .monitor: return Color(hex: "38BDF8")
@@ -271,6 +276,8 @@ public struct DashboardView: View {
             RenameTabContentView(
                 autoCleanRenameList: $autoCleanRenameList
             )
+        case .notes:
+            NotesTabContentView()
         case .snap:
             SnapTabContentView()
         case .menubar:
@@ -404,6 +411,7 @@ struct DashboardSidebarView: View {
                     SidebarItemButton(tab: .recorder, selectedTab: $selectedTab, badge: "⌥R")
                     SidebarItemButton(tab: .wake, selectedTab: $selectedTab, badge: isPowerActive ? "Đang bật" : nil)
                     SidebarItemButton(tab: .rename, selectedTab: $selectedTab, badge: "⌘⇧R")
+                    SidebarItemButton(tab: .notes, selectedTab: $selectedTab, badge: "⌥N")
                     SidebarItemButton(tab: .snap, selectedTab: $selectedTab, badge: "⌃⌥")
                     SidebarItemButton(tab: .menubar, selectedTab: $selectedTab, badge: "⌃⌥B")
                     SidebarItemButton(tab: .monitor, selectedTab: $selectedTab, badge: "\(Int(monitor.snapshot.cpu.totalUsage))%")
@@ -434,6 +442,7 @@ struct DashboardHeaderBar: View {
         case .recorder: return "Ghi màn hình"
         case .wake: return "Chống ngủ Mac"
         case .rename: return "Đổi tên tệp Finder"
+        case .notes: return "Ghi chú mép màn hình (Edge Notes)"
         case .snap: return "Snap Areas (Chia & Bố cục cửa sổ)"
         case .menubar: return "Menu Bar Icons (Ẩn bớt biểu tượng thanh menu)"
         case .monitor: return "Theo dõi hệ thống (CPU, GPU, RAM & Nhiệt độ)"
@@ -698,6 +707,19 @@ struct OverviewTabContentView: View {
                     HostActionCoordinator.shared.presentBatchRename(urls: [])
                 } onConfigure: {
                     onSelectTab(.rename)
+                }
+                
+                LiquidToolCard(
+                    title: "Ghi chú mép màn hình",
+                    subtitle: "Rê chuột mép phải là mở, gõ tự lưu, đồng bộ  Notes",
+                    icon: "note.text",
+                    accentColor: Color(hex: "F59E0B"),
+                    statusBadge: "⌥N",
+                    actionLabel: "Mở ghi chú"
+                ) {
+                    EdgeNotesWindowController.shared.toggleDrawer()
+                } onConfigure: {
+                    onSelectTab(.notes)
                 }
                 
                 LiquidToolCard(
