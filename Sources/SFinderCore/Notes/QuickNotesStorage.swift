@@ -96,6 +96,19 @@ public final class QuickNotesStorage: ObservableObject {
         }
     }
     
+    public func updateAppleNotesId(for noteId: UUID, appleNotesId: String) {
+        if currentNote.id == noteId {
+            currentNote.appleNotesId = appleNotesId
+        }
+        if let idx = notes.firstIndex(where: { $0.id == noteId }) {
+            notes[idx].appleNotesId = appleNotesId
+        }
+        
+        if let data = try? JSONEncoder().encode(notes) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+    
     // MARK: - Actions
     
     public func createNewNote(mode: QuickNoteMode = .text) {
@@ -119,6 +132,9 @@ public final class QuickNotesStorage: ObservableObject {
     }
     
     public func deleteNote(_ note: QuickNoteItem) {
+        if let appleId = note.appleNotesId {
+            AppleNotesSyncEngine.shared.deleteNoteFromAppleNotes(appleNotesId: appleId)
+        }
         notes.removeAll(where: { $0.id == note.id })
         if currentNote.id == note.id {
             if let first = notes.first {
