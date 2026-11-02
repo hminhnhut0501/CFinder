@@ -1,0 +1,15 @@
+# Swift Package Manager & Builds
+.build/
+dist/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+
+# macOS system files
+.DS_Store
+*.swp
+*~
+
+# Local & environment
+.env
+.system_generated/
