@@ -217,6 +217,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             EdgeNotesWindowController.shared.toggleDrawer()
         } else if url.host == "wake-toggle" || url.path.contains("wake-toggle") {
             PowerManager.shared.toggleQuickSession()
+        } else if url.host == "wake-timed" || url.path.contains("wake-timed") {
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            let mins = Int(components?.queryItems?.first(where: { $0.name == "minutes" })?.value ?? "15") ?? 15
+            PowerManager.shared.startTimedSession(minutes: mins)
+        } else if url.host == "wake-indefinite" || url.path.contains("wake-indefinite") {
+            PowerManager.shared.startIndefiniteSession()
         } else if url.host == "undo" || url.path.contains("undo") {
             HostActionCoordinator.shared.handleMessage(IPCMessage(actionType: .undoBatchRename))
         } else {
@@ -255,12 +261,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         
         if pm.isActive {
             if let badge = pm.compactBadgeString {
-                button.title = " \(badge)"
+                let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                let accentColor = isDark
+                    ? NSColor(red: 0.25, green: 0.82, blue: 1.0, alpha: 1.0)
+                    : NSColor(red: 0.05, green: 0.55, blue: 0.85, alpha: 1.0)
+                let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+                button.attributedTitle = NSAttributedString(string: " \(badge)", attributes: [
+                    .foregroundColor: accentColor,
+                    .font: font
+                ])
             } else {
+                button.attributedTitle = NSAttributedString(string: "")
                 button.title = ""
             }
             button.toolTip = "CFinder: Đang giữ thức (\(pm.formattedRemainingTime))\nOption-Click hoặc phím ⌘X để dừng"
         } else {
+            button.attributedTitle = NSAttributedString(string: "")
             button.title = ""
             button.toolTip = "CFinder: Chế độ giữ thức đang tắt (Bấm để xem menu, ⌘I để bật nhanh)"
         }

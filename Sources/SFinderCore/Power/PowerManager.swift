@@ -425,7 +425,7 @@ public final class PowerManager: ObservableObject {
         guard isActive else { return nil }
         switch currentSession {
         case .indefinite:
-            return nil
+            return "∞"
         case .timed:
             let total = Int(remainingSeconds)
             let hours = total / 3600
