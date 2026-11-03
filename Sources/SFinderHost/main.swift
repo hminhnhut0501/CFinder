@@ -242,10 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateStatusItemAppearance()
         
         // Listen to PowerManager state changes in real time
-        powerCancellable = Publishers.Merge3(
+        powerCancellable = Publishers.Merge4(
             PowerManager.shared.$isActive.map { _ in () },
             PowerManager.shared.$remainingSeconds.map { _ in () },
-            PowerManager.shared.$currentSession.map { _ in () }
+            PowerManager.shared.$currentSession.map { _ in () },
+            PowerManager.shared.$isSleepTimerActive.map { _ in () }
         )
         .receive(on: DispatchQueue.main)
         .sink { [weak self] in
@@ -257,17 +258,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let button = statusItem?.button else { return }
         let pm = PowerManager.shared
         
-        button.image = BrandAssets.menuBarIcon(isActive: pm.isActive)
+        let themeMode: BrandAssets.MenuBarThemeMode
+        if case .networkIdle = pm.currentSession {
+            themeMode = .networkIdle // Xanh dương cho tự ngủ khi tải xong
+        } else {
+            themeMode = .wake        // Màu cam cho chống ngủ Mac
+        }
+        
+        button.image = BrandAssets.menuBarIcon(isActive: pm.isActive, mode: themeMode)
         
         if pm.isActive {
             if let badge = pm.compactBadgeString {
                 let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                let accentColor = isDark
-                    ? NSColor(red: 0.25, green: 0.82, blue: 1.0, alpha: 1.0)
-                    : NSColor(red: 0.05, green: 0.55, blue: 0.85, alpha: 1.0)
+                // Màu trắng trung tính trang nhã cho chữ số / icon vô hạn / tốc độ
+                let neutralColor = isDark
+                    ? NSColor(white: 0.96, alpha: 1.0)
+                    : NSColor(white: 0.12, alpha: 1.0)
                 let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
                 button.attributedTitle = NSAttributedString(string: " \(badge)", attributes: [
-                    .foregroundColor: accentColor,
+                    .foregroundColor: neutralColor,
                     .font: font
                 ])
             } else {

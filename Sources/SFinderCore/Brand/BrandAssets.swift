@@ -59,16 +59,36 @@ public final class BrandAssets: Sendable {
         return nil
     }
     
-    public static func menuBarIcon(isActive: Bool = false) -> NSImage {
+    public enum MenuBarThemeMode: Sendable {
+        case wake        // Màu Cam (Chống ngủ Mac #FF9500)
+        case networkIdle // Màu Xanh dương (Tự ngủ khi tải / Mạng rỗi #0A84FF)
+        case sleepTimer  // Màu Tím (Hẹn giờ ngủ #AF52DE)
+        
+        public var dotColor: NSColor {
+            switch self {
+            case .wake:
+                return NSColor(red: 1.0, green: 0.584, blue: 0.0, alpha: 1.0)
+            case .networkIdle:
+                return NSColor(red: 0.039, green: 0.518, blue: 1.0, alpha: 1.0)
+            case .sleepTimer:
+                return NSColor(red: 0.686, green: 0.322, blue: 0.871, alpha: 1.0)
+            }
+        }
+    }
+    
+    public static func menuBarIcon(isActive: Bool = false, mode: MenuBarThemeMode = .wake) -> NSImage {
         if isActive {
-            return wakeActiveIcon()
+            return wakeActiveIcon(dotColor: mode.dotColor)
         } else {
             return wakeInactiveIcon()
         }
     }
     
-    /// Biểu tượng trạng thái giữ thức ĐANG BẬT (Active — On.svg with glowing lime green center)
-    public static func wakeActiveIcon(size: NSSize = NSSize(width: 18, height: 18)) -> NSImage {
+    /// Biểu tượng trạng thái giữ thức ĐANG BẬT (Active — Tâm tròn đổi màu thông minh theo chức năng)
+    public static func wakeActiveIcon(
+        dotColor: NSColor = NSColor(red: 1.0, green: 0.584, blue: 0.0, alpha: 1.0),
+        size: NSSize = NSSize(width: 18, height: 18)
+    ) -> NSImage {
         let img = NSImage(size: size, flipped: false) { rect in
             let appearance = NSAppearance.currentDrawing()
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -76,6 +96,17 @@ public final class BrandAssets: Sendable {
             let resName = isDark ? "MenuBarOn" : "MenuBarOnLight"
             if let svg = loadSvg(base64: b64, resourceName: resName) {
                 svg.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1.0)
+                
+                // Vẽ tâm tròn chuẩn xác 100% theo màu chức năng
+                let scale = min(rect.width / 1024.0, rect.height / 1024.0)
+                let offsetX = rect.origin.x + (rect.width - 1024.0 * scale) / 2.0
+                let offsetY = rect.origin.y + (rect.height - 1024.0 * scale) / 2.0
+                let center = NSPoint(x: offsetX + 512.0 * scale, y: offsetY + 523.45 * scale)
+                let radius = 192.33 * scale
+                let dotRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+                
+                dotColor.setFill()
+                NSBezierPath(ovalIn: dotRect).fill()
                 return true
             }
             return false
