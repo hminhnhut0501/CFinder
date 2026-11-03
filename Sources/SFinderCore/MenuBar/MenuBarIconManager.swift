@@ -192,7 +192,14 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
         self.autoHideEnabled = defaults.object(forKey: "sfinder_menubar_autohide_enabled") as? Bool ?? true
         self.autoHideDelay = defaults.object(forKey: "sfinder_menubar_autohide_delay") as? Double ?? 5.0
         self.expandOnHover = defaults.object(forKey: "sfinder_menubar_expand_on_hover") as? Bool ?? true
-        self.showSeparator = defaults.object(forKey: "sfinder_menubar_show_separator") as? Bool ?? true
+        // Default separator line to false to keep menubar clean
+        if defaults.object(forKey: "sfinder_menubar_show_separator_v2") == nil {
+            defaults.set(false, forKey: "sfinder_menubar_show_separator")
+            defaults.set(true, forKey: "sfinder_menubar_show_separator_v2")
+            self.showSeparator = false
+        } else {
+            self.showSeparator = defaults.object(forKey: "sfinder_menubar_show_separator") as? Bool ?? false
+        }
         super.init()
         
         NotificationCenter.default.addObserver(
@@ -297,11 +304,6 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
             onOpenSettings?()
             return
         }
-        onShowToast?(
-            "command",
-            "Mẹo sắp xếp Menu Bar",
-            "Giữ phím ⌘ (Command) và kéo các biểu tượng qua lại nút mũi tên để ẩn hoặc hiện"
-        )
     }
     
     // MARK: - Collapse & Expand Actions
@@ -309,18 +311,8 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     public func toggle() {
         if isCollapsed {
             expand()
-            onShowToast?(
-                "chevron.right.2",
-                "Đã hiện icon thanh menu",
-                autoHideEnabled && !isOrganizingMode ? "Sẽ tự ẩn sau \(Int(autoHideDelay))s khi không dùng" : "Bấm lại để thu gọn"
-            )
         } else {
             collapse()
-            onShowToast?(
-                "chevron.left.2",
-                "Đã giấu icon thanh menu",
-                "Bấm ⌃⌥B hoặc rê chuột vào mũi tên ◀ để mở lại"
-            )
         }
     }
     
@@ -389,13 +381,14 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
                 sep.button?.image = makeSeparatorImage()
                 sep.button?.toolTip = "CFinder: Giữ phím ⌘ và kéo biểu tượng sang bên trái vạch này để ẩn"
             } else {
+                sep.length = 0.0
                 sep.button?.image = nil
+                sep.button?.toolTip = nil
             }
         } else {
-            if !isCollapsed {
-                sep.length = 0.0
-            }
+            sep.length = 0.0
             sep.button?.image = nil
+            sep.button?.toolTip = nil
         }
     }
     
@@ -491,7 +484,6 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
                             let currentPos = NSEvent.mouseLocation
                             if hitTarget.contains(currentPos) {
                                 self.expand()
-                                self.onShowToast?("cursorarrow.rays", "Rê chuột vào nút mở", "Đã mở rộng thanh menu bar")
                             }
                         }
                     }
