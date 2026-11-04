@@ -46,6 +46,7 @@ testCase("Chuyển đổi kiểu chữ (lower, upper, title, camelCase, snake_ca
 // 3. Find & Replace with Regex
 testCase("Tìm kiếm và thay thế kèm Regex") {
     var rule = RenameRule()
+    rule.enableNumbering = false
     rule.enableFindReplace = true
     rule.findText = #"IMG_\d+"#
     rule.replaceText = "Photo"
@@ -84,6 +85,7 @@ testCase("Đánh số thứ tự (01, 02) và chuẩn hóa đuôi (.jpg)") {
 // 5. Collision Detection
 testCase("Phát hiện xung đột trùng tên tệp trong danh sách và trên đĩa") {
     var rule = RenameRule()
+    rule.enableNumbering = false
     rule.enableFindReplace = true
     rule.findText = "fileB"
     rule.replaceText = "fileA"
@@ -106,6 +108,7 @@ testCase("Thực thi đổi tên an toàn và Hoàn tác (Undo ⌘Z)") {
     try "vid2".write(to: f2, atomically: true, encoding: .utf8)
     
     var rule = RenameRule()
+    rule.enableNumbering = false
     rule.enablePrefixSuffix = true
     rule.prefix = "Final_"
     
@@ -126,6 +129,35 @@ testCase("Thực thi đổi tên an toàn và Hoàn tác (Undo ⌘Z)") {
     print("  ✓ Hoàn tác thành công về đúng tên gốc ban đầu!")
 }
 
+// 7. Clear Original Name (Reset toàn bộ ký tự tên cũ)
+testCase("Xóa sạch ký tự tên cũ (clearOriginalName) và đánh số mới") {
+    let f1 = tempDir.appendingPathComponent("Complex_Messy_Name_123.jpg")
+    let f2 = tempDir.appendingPathComponent("Another_Messy_File_456.jpg")
+    try "img1".write(to: f1, atomically: true, encoding: .utf8)
+    try "img2".write(to: f2, atomically: true, encoding: .utf8)
+    
+    // A. Xóa sạch tên, chỉ lấy số thứ tự
+    var rule1 = RenameRule()
+    rule1.clearOriginalName = true
+    rule1.enableNumbering = true
+    rule1.numberingFormat = .twoDigits
+    let prev1 = BatchRenameEngine.shared.generatePreview(urls: [f1, f2], rule: rule1)
+    assert(prev1[0].newName == "01.jpg")
+    assert(prev1[1].newName == "02.jpg")
+    print("  ✓ Xóa sạch ký tự tên cũ -> chỉ lấy số: '01.jpg', '02.jpg'")
+    
+    // B. Xóa sạch tên cũ và đặt tên mới
+    var rule2 = RenameRule()
+    rule2.clearOriginalName = true
+    rule2.customBaseName = "Photo"
+    rule2.enableNumbering = true
+    rule2.numberingFormat = .twoDigits
+    let prev2 = BatchRenameEngine.shared.generatePreview(urls: [f1, f2], rule: rule2)
+    assert(prev2[0].newName == "Photo_01.jpg")
+    assert(prev2[1].newName == "Photo_02.jpg")
+    print("  ✓ Xóa sạch tên cũ và đặt tên mới + số: 'Photo_01.jpg', 'Photo_02.jpg'")
+}
+
 print("\n================================================================================")
-print("🎉 TOÀN BỘ 6/6 BỘ KIỂM THỬ ĐẠT 100% HOÀN HẢO!")
+print("🎉 TOÀN BỘ 7/7 BỘ KIỂM THỬ ĐẠT 100% HOÀN HẢO!")
 print("================================================================================")

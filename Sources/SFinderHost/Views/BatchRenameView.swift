@@ -262,6 +262,38 @@ public struct BatchRenameView: View {
                 .help("Xóa toàn bộ tệp trong danh sách về trạng thái trống")
             }
             
+            // Clear all original name characters toggle
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    rule.clearOriginalName.toggle()
+                    if rule.clearOriginalName {
+                        statusMessage = "Đã bật chế độ Xóa sạch ký tự tên cũ"
+                    } else {
+                        statusMessage = "Đã khôi phục giữ ký tự tên gốc"
+                    }
+                    isSuccess = true
+                }
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: rule.clearOriginalName ? "checkmark.circle.fill" : "eraser.line.dashed")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(rule.clearOriginalName ? "Đang xóa tên cũ" : "Xóa hết tên cũ")
+                        .font(.system(size: 11.5, weight: .medium))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(rule.clearOriginalName ? Color.red.opacity(0.15) : Color.white.opacity(0.06))
+                .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .white.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(rule.clearOriginalName ? Color.red.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .help("Xóa toàn bộ ký tự tên gốc của các tệp để đặt tên mới từ đầu")
+            
             // Reset rule button
             Button(action: handleResetFormat) {
                 HStack(spacing: 5) {
@@ -389,7 +421,7 @@ public struct BatchRenameView: View {
                     }
                     
                 case .numbering:
-                    HStack(spacing: 14) {
+                    HStack(spacing: 12) {
                         Picker("Định dạng:", selection: $rule.numberingFormat) {
                             ForEach(NumberingFormat.allCases, id: \.self) { fmt in
                                 Text(fmt.rawValue).tag(fmt)
@@ -403,6 +435,11 @@ public struct BatchRenameView: View {
                             }
                         }
                         .frame(width: 190)
+                        
+                        if rule.numberingPosition == .replace || rule.clearOriginalName {
+                            glassInputField(title: "Tên mới:", placeholder: "Để trống để chỉ lấy số...", text: $rule.customBaseName)
+                                .frame(width: 190)
+                        }
                         
                         HStack(spacing: 4) {
                             Text("Bắt đầu:")
@@ -423,6 +460,11 @@ public struct BatchRenameView: View {
                                 .frame(width: 45)
                         }
                         
+                        Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .help("Xóa toàn bộ ký tự tên gốc để thay bằng tên mới hoặc chỉ số thứ tự")
+                        
                         Toggle("Bật số", isOn: $rule.enableNumbering)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5, weight: .semibold))
@@ -434,6 +476,11 @@ public struct BatchRenameView: View {
                     HStack(spacing: 14) {
                         glassInputField(title: "Thêm vào đầu (Tiền tố):", placeholder: "Ví dụ: Final_, Tailieu_...", text: $rule.prefix)
                         glassInputField(title: "Thêm vào đuôi (Hậu tố):", placeholder: "Ví dụ: _v1.0, _HD...", text: $rule.suffix)
+                        
+                        Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .help("Xóa sạch ký tự tên gốc và chỉ giữ lại tiền tố / hậu tố vừa nhập")
                         
                         if !rule.prefix.isEmpty || !rule.suffix.isEmpty {
                             Button(action: {
@@ -495,6 +542,11 @@ public struct BatchRenameView: View {
                         Toggle("Cắt khoảng trắng thừa", isOn: $rule.trimSpaces)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 12))
+                        
+                        Toggle("Xóa sạch toàn bộ ký tự tên cũ (Chỉ giữ đuôi tệp)", isOn: $rule.clearOriginalName)
+                            .toggleStyle(.checkbox)
+                            .font(.system(size: 12, weight: rule.clearOriginalName ? .bold : .medium))
+                            .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .primary)
                         
                         Spacer()
                     }
@@ -799,8 +851,10 @@ public struct BatchRenameView: View {
     private func handleResetFormat() {
         RenameRule.resetToDefault()
         self.rule = RenameRule()
+        self.rule.clearOriginalName = false
+        self.rule.customBaseName = ""
         self.selectedTab = .numbering
-        self.statusMessage = "Đã đặt lại định dạng về mặc định"
+        self.statusMessage = "Đã đặt lại quy tắc đổi tên về mặc định"
         self.isSuccess = true
         updatePreview()
     }

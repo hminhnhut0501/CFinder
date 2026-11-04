@@ -85,6 +85,11 @@ public final class BatchRenameEngine: Sendable {
             
             var workingName = baseName
             
+            // 0. Reset / Xóa sạch ký tự tên gốc
+            if rule.clearOriginalName || rule.numberingPosition == .replace {
+                workingName = rule.customBaseName
+            }
+            
             // 1. Find & Replace
             if rule.enableFindReplace && !rule.findText.isEmpty {
                 if rule.isRegex {
@@ -113,13 +118,21 @@ public final class BatchRenameEngine: Sendable {
                 let currentNum = rule.startNumber + (index * rule.step)
                 let numStr = formatNumber(currentNum, format: rule.numberingFormat)
                 
-                switch rule.numberingPosition {
-                case .prefix:
-                    workingName = "\(numStr)\(rule.numberingSeparator)\(workingName)"
-                case .suffix:
-                    workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
-                case .replace:
-                    workingName = numStr
+                if rule.clearOriginalName || rule.numberingPosition == .replace {
+                    if workingName.isEmpty {
+                        workingName = numStr
+                    } else {
+                        workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                    }
+                } else {
+                    switch rule.numberingPosition {
+                    case .prefix:
+                        workingName = "\(numStr)\(rule.numberingSeparator)\(workingName)"
+                    case .suffix:
+                        workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                    case .replace:
+                        workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                    }
                 }
             }
             
@@ -146,7 +159,12 @@ public final class BatchRenameEngine: Sendable {
             
             // Prevent empty file name
             if workingName.isEmpty {
-                workingName = baseName
+                if rule.clearOriginalName || rule.numberingPosition == .replace {
+                    let currentNum = rule.startNumber + (index * rule.step)
+                    workingName = formatNumber(currentNum, format: rule.numberingFormat)
+                } else {
+                    workingName = baseName
+                }
             }
             
             // 7. Extension formatting

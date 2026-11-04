@@ -34,6 +34,10 @@ public enum ExtensionTransform: String, CaseIterable, Codable, Sendable {
 }
 
 public struct RenameRule: Codable, Equatable, Sendable {
+    // 0. Reset / Xóa sạch ký tự tên gốc
+    public var clearOriginalName: Bool = false // Xóa hết toàn bộ ký tự tên gốc để bắt đầu từ đầu
+    public var customBaseName: String = ""     // Tên mới cơ sở (tuỳ chọn)
+    
     // 1. Sequence numbering (Ưu tiên hàng đầu)
     public var enableNumbering: Bool = true
     public var numberingFormat: NumberingFormat = .twoDigits
