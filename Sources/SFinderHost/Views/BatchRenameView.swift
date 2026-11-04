@@ -80,13 +80,13 @@ public struct BatchRenameView: View {
             VStack {
                 HStack {
                     Circle()
-                        .fill(CFinderTheme.primary.opacity(ambientPulse ? 0.16 : 0.09))
+                        .fill(CFinderTheme.FeatureColor.rename.opacity(ambientPulse ? 0.15 : 0.08))
                         .frame(width: ambientPulse ? 360 : 310, height: ambientPulse ? 360 : 310)
                         .blur(radius: 65)
                         .offset(x: ambientPulse ? -60 : -90, y: ambientPulse ? -40 : -70)
                     Spacer()
                     Circle()
-                        .fill(Color(hex: "BF5AF2").opacity(ambientPulse ? 0.12 : 0.06))
+                        .fill(Color(hex: "A855F7").opacity(ambientPulse ? 0.12 : 0.06))
                         .frame(width: ambientPulse ? 320 : 270, height: ambientPulse ? 320 : 270)
                         .blur(radius: 65)
                         .offset(x: ambientPulse ? 70 : 90, y: ambientPulse ? -20 : -50)
@@ -99,6 +99,7 @@ public struct BatchRenameView: View {
             // MARK: - Main Layout
             VStack(spacing: 0) {
                 headerBar
+                Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
                 tabSelectionBar
                 controlPanelArea
                 fileListArea
@@ -158,38 +159,39 @@ public struct BatchRenameView: View {
     
     private var headerBar: some View {
         HStack(spacing: 12) {
-            // Spacing for native macOS traffic lights (red/yellow/green)
-            Spacer()
-                .frame(width: 72)
+            // Squircle Brand Badge (Dashboard style)
+            ZStack {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(CFinderTheme.FeatureColor.rename.opacity(0.14))
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .stroke(CFinderTheme.FeatureColor.rename.opacity(0.28), lineWidth: 1)
+                    )
+                Image(systemName: "pencil.and.list.clipboard")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(CFinderTheme.FeatureColor.rename)
+            }
             
-            // App Branding Pill
-            HStack(spacing: 10) {
-                Image(nsImage: BrandAssets.appIconImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 30, height: 30)
-                    .cornerRadius(7)
-                    .shadow(color: Color.black.opacity(0.2), radius: 3, x: 0, y: 1)
-                
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text("CFinder")
-                            .font(.system(size: 14.5, weight: .bold, design: .rounded))
-                        Text("STUDIO")
-                            .font(.system(size: 8.5, weight: .heavy, design: .rounded))
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1.5)
-                            .background(
-                                Capsule()
-                                    .fill(LinearGradient(colors: [Color.blue, Color.cyan], startPoint: .leading, endPoint: .trailing))
-                            )
-                            .foregroundColor(.white)
-                    }
-                    
-                    Text("Đổi tên tệp hàng loạt trên Finder")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text("Đổi tên tệp hàng loạt")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white)
+                    Text("STUDIO")
+                        .font(.system(size: 8.5, weight: .heavy, design: .rounded))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(LinearGradient(colors: [CFinderTheme.FeatureColor.rename, Color(hex: "A855F7")], startPoint: .leading, endPoint: .trailing))
+                        )
+                        .foregroundColor(.white)
                 }
+                
+                Text("Đổi tên nhanh, đánh số thứ tự và định dạng an toàn trên Finder")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color.white.opacity(0.5))
             }
             
             Spacer()
@@ -197,7 +199,7 @@ public struct BatchRenameView: View {
             // Search / Filter inside list
             HStack(spacing: 6) {
                 Image(systemName: "line.3.horizontal.decrease.circle")
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.5))
                     .font(.system(size: 12))
                 TextField("Lọc danh sách tệp...", text: $searchText)
                     .textFieldStyle(.plain)
@@ -205,19 +207,22 @@ public struct BatchRenameView: View {
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.white.opacity(0.5))
                             .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .frame(width: 190)
-            .background(Color.primary.opacity(0.05))
-            .cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.5))
+            .frame(width: 170)
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
             
             // Add files button
             Button(action: handleChooseFiles) {
@@ -229,9 +234,9 @@ public struct BatchRenameView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -247,10 +252,10 @@ public struct BatchRenameView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(Color.red.opacity(0.1))
+                    .background(Color.red.opacity(0.12))
                     .foregroundColor(Color.red.opacity(0.9))
-                    .cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red.opacity(0.2), lineWidth: 0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.red.opacity(0.25), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
@@ -267,9 +272,9 @@ public struct BatchRenameView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -280,21 +285,38 @@ public struct BatchRenameView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.uturn.backward")
                         .font(.system(size: 11, weight: .bold))
-                    Text("Hoàn tác (⌘Z)")
+                    Text("Hoàn tác")
                         .font(.system(size: 11.5, weight: .medium))
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
-                .background(Color.primary.opacity(0.06))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
+            .help("Hoàn tác lượt đổi tên gần nhất (⌘Z)")
+            
+            // Dashboard-style Circular Close Button
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(7)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
+                    )
+            }
+            .buttonStyle(.plain)
+            .focusEffectDisabled()
+            .help("Đóng cửa sổ")
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 14)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+        .background(Color.white.opacity(0.015))
     }
     
     // MARK: - 2. Mode Tab Bar
@@ -322,13 +344,13 @@ public struct BatchRenameView: View {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(
                                         LinearGradient(
-                                            colors: [CFinderTheme.primary, Color(hex: "0066FF")],
+                                            colors: [CFinderTheme.FeatureColor.rename, Color(hex: "7C3AED")],
                                             startPoint: .topLeading,
                                             endPoint: .bottomTrailing
                                         )
                                     )
                                     .matchedGeometryEffect(id: "activeTabIndicator", in: tabNamespace)
-                                    .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 2)
+                                    .shadow(color: CFinderTheme.FeatureColor.rename.opacity(0.35), radius: 8, y: 2)
                             } else {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(Color.primary.opacity(0.03))
@@ -508,6 +530,7 @@ public struct BatchRenameView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .glassCard(cornerRadius: 12, strokeOpacity: 0.15, fillOpacity: 0.04)
+            .animation(.easeInOut(duration: 0.22), value: selectedTab)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
@@ -543,6 +566,7 @@ public struct BatchRenameView: View {
             
             if currentURLs.isEmpty {
                 emptyDropStateView
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
                 ScrollView {
                     LazyVStack(spacing: 4) {
@@ -553,8 +577,10 @@ public struct BatchRenameView: View {
                     .padding(.horizontal, 20)
                     .padding(.vertical, 6)
                 }
+                .transition(.opacity)
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: currentURLs.isEmpty)
     }
     
     private var emptyDropStateView: some View {
@@ -932,10 +958,10 @@ struct RenameFooterBarView: View {
                 
                 if changedCount > 0 {
                     HStack(spacing: 5) {
-                        Circle().fill(CFinderTheme.primary).frame(width: 6, height: 6)
+                        Circle().fill(CFinderTheme.FeatureColor.rename).frame(width: 6, height: 6)
                         Text("\(changedCount) sẽ đổi tên")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(CFinderTheme.primary)
+                            .foregroundColor(CFinderTheme.FeatureColor.rename)
                     }
                 }
                 
@@ -998,7 +1024,7 @@ struct RenameFooterBarView: View {
                 .background(
                     LinearGradient(
                         colors: canApply
-                            ? [CFinderTheme.primary, Color(hex: "0066FF")]
+                            ? [CFinderTheme.FeatureColor.rename, Color(hex: "7C3AED")]
                             : [Color.gray.opacity(0.35), Color.gray.opacity(0.25)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -1007,7 +1033,7 @@ struct RenameFooterBarView: View {
                 .foregroundColor(.white)
                 .cornerRadius(9)
                 .shadow(
-                    color: canApply ? Color.blue.opacity(isApplyHovered ? 0.55 : 0.35) : Color.clear,
+                    color: canApply ? CFinderTheme.FeatureColor.rename.opacity(isApplyHovered ? 0.55 : 0.35) : Color.clear,
                     radius: isApplyHovered ? 12 : 7,
                     y: isApplyHovered ? 4 : 2
                 )

@@ -17,11 +17,15 @@ public final class HostActionCoordinator: ObservableObject {
     
     @Published public var dashboardWindowController: NSWindowController?
     @Published public var renameWindowController: NSWindowController?
+    @Published public var videoTwinWindowController: NSWindowController?
+    @Published public var videoInspectorWindowController: NSWindowController?
     @Published public var settingsWindowController: NSWindowController?
     @Published public var historyWindowController: NSWindowController?
     @Published public var currentRenameURLs: [URL] = []
     
     private var renameDelegate: WindowCloseDelegate?
+    private var videoTwinDelegate: WindowCloseDelegate?
+    private var videoInspectorDelegate: WindowCloseDelegate?
     private var dashboardDelegate: WindowCloseDelegate?
     private var settingsDelegate: WindowCloseDelegate?
     private var historyDelegate: WindowCloseDelegate?
@@ -98,6 +102,12 @@ public final class HostActionCoordinator: ObservableObject {
         case .showBatchRenameUI:
             presentBatchRename(urls: urls)
             
+        case .scanVideoDuplicates:
+            presentVideoTwinStudio(urls: urls)
+            
+        case .inspectVideo:
+            presentVideoInspector(urls: urls)
+            
         case .captureOCR:
             Task {
                 _ = try? await ScreenOCREngine.shared.captureScreenInteractively()
@@ -167,6 +177,7 @@ public final class HostActionCoordinator: ObservableObject {
             defer: false
         )
         window.center()
+        window.animationBehavior = .documentWindow
         window.title = "CFinder — Đổi tên hàng loạt (\(titleCount))"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -212,7 +223,178 @@ public final class HostActionCoordinator: ObservableObject {
         self.renameDelegate = nil
         controller.window?.orderOut(nil)
         controller.close()
-        if self.dashboardWindowController == nil && self.settingsWindowController == nil && self.historyWindowController == nil {
+        if self.dashboardWindowController == nil && self.settingsWindowController == nil && self.historyWindowController == nil && self.videoTwinWindowController == nil && self.videoInspectorWindowController == nil {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+    
+    // MARK: - VideoTwin Duplicate Finder Studio
+    
+    public func presentVideoTwinStudio(urls: [URL]) {
+        NSLog("[HostActionCoordinator] presentVideoTwinStudio called with %ld input URLs", urls.count)
+        
+        if let existing = videoTwinWindowController {
+            self.videoTwinWindowController = nil
+            existing.window?.delegate = nil
+            self.videoTwinDelegate = nil
+            existing.window?.orderOut(nil)
+            existing.close()
+        }
+        
+        NSApp.setActivationPolicy(.regular)
+        let contentView = VideoTwinStudioView(urls: urls) { [weak self] in
+            self?.closeVideoTwinStudio()
+        }
+        
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.minSize = NSSize(width: 860, height: 580)
+        window.center()
+        window.animationBehavior = .documentWindow
+        window.title = "CFinder — VideoTwin Studio (Tìm video trùng lặp)"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.level = .normal
+        
+        let hostingView = NSHostingView(rootView: contentView)
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = 16
+        hostingView.layer?.masksToBounds = true
+        window.contentView = hostingView
+        window.isReleasedWhenClosed = false
+        
+        let delegate = WindowCloseDelegate()
+        delegate.onClose = { [weak self] in
+            self?.videoTwinWindowController = nil
+            self?.videoTwinDelegate = nil
+            if self?.dashboardWindowController == nil && self?.settingsWindowController == nil && self?.historyWindowController == nil && self?.renameWindowController == nil {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
+        self.videoTwinDelegate = delegate
+        window.delegate = delegate
+        
+        let controller = NSWindowController(window: window)
+        self.videoTwinWindowController = controller
+        
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    public func closeVideoTwinStudio() {
+        guard let controller = videoTwinWindowController else { return }
+        self.videoTwinWindowController = nil
+        controller.window?.delegate = nil
+        self.videoTwinDelegate = nil
+        controller.window?.orderOut(nil)
+        controller.close()
+        if self.dashboardWindowController == nil && self.settingsWindowController == nil && self.historyWindowController == nil && self.renameWindowController == nil && self.videoInspectorWindowController == nil {
+            NSApp.setActivationPolicy(.accessory)
+        }
+    }
+    
+    // MARK: - Video Inspector & Intelligent Comparator
+    
+    public func presentVideoInspector(urls: [URL]) {
+        NSLog("[HostActionCoordinator] presentVideoInspector called with %ld input URLs", urls.count)
+        var targetURLs = urls
+        
+        let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "ts", "flv", "wmv"]
+        
+        // If a single folder was passed, expand its contents to find all videos
+        if targetURLs.count == 1, let single = targetURLs.first {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: single.path, isDirectory: &isDir), isDir.boolValue {
+                if let contents = try? FileManager.default.contentsOfDirectory(at: single, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                    let videos = contents.filter { videoExtensions.contains($0.pathExtension.lowercased()) }
+                    if !videos.isEmpty {
+                        targetURLs = videos
+                    }
+                }
+            }
+        }
+        
+        if let existing = videoInspectorWindowController {
+            self.videoInspectorWindowController = nil
+            existing.window?.delegate = nil
+            self.videoInspectorDelegate = nil
+            existing.window?.orderOut(nil)
+            existing.close()
+        }
+        
+        NSApp.setActivationPolicy(.regular)
+        let contentView = VideoInspectorMasterView(urls: targetURLs) { [weak self] in
+            self?.closeVideoInspector()
+        }
+        
+        let count = max(2, targetURLs.count)
+        let calcWidth = CGFloat(count) * 340 + 48
+        let initialWidth: CGFloat = targetURLs.count >= 2 ? min(max(calcWidth, 1100), 1400) : 780
+        let initialHeight: CGFloat = targetURLs.count >= 2 ? 740 : 640
+        
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: initialWidth, height: initialHeight),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.minSize = NSSize(width: 800, height: 580)
+        window.center()
+        window.animationBehavior = .documentWindow
+        window.title = targetURLs.count >= 2 ? "CFinder — Video Comparator (So sánh & Chấm điểm Video)" : "CFinder — Video Inspector (Thông số chi tiết Video)"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.backgroundColor = .clear
+        window.isOpaque = false
+        window.hasShadow = true
+        window.isMovableByWindowBackground = true
+        window.level = .normal
+        
+        let hostingView = NSHostingView(rootView: contentView)
+        hostingView.wantsLayer = true
+        hostingView.layer?.cornerRadius = 16
+        hostingView.layer?.masksToBounds = true
+        window.contentView = hostingView
+        window.isReleasedWhenClosed = false
+        
+        let delegate = WindowCloseDelegate()
+        delegate.onClose = { [weak self] in
+            self?.videoInspectorWindowController = nil
+            self?.videoInspectorDelegate = nil
+            if self?.dashboardWindowController == nil && self?.settingsWindowController == nil && self?.historyWindowController == nil && self?.renameWindowController == nil && self?.videoTwinWindowController == nil {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
+        self.videoInspectorDelegate = delegate
+        window.delegate = delegate
+        
+        let controller = NSWindowController(window: window)
+        self.videoInspectorWindowController = controller
+        
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    
+    public func closeVideoInspector() {
+        guard let controller = videoInspectorWindowController else { return }
+        self.videoInspectorWindowController = nil
+        controller.window?.delegate = nil
+        self.videoInspectorDelegate = nil
+        controller.window?.orderOut(nil)
+        controller.close()
+        if self.dashboardWindowController == nil && self.settingsWindowController == nil && self.historyWindowController == nil && self.renameWindowController == nil && self.videoTwinWindowController == nil {
             NSApp.setActivationPolicy(.accessory)
         }
     }
@@ -413,6 +595,12 @@ public final class HostActionCoordinator: ObservableObject {
             windowsToHide.append(win)
         }
         if let win = renameWindowController?.window, win.isVisible {
+            windowsToHide.append(win)
+        }
+        if let win = videoTwinWindowController?.window, win.isVisible {
+            windowsToHide.append(win)
+        }
+        if let win = videoInspectorWindowController?.window, win.isVisible {
             windowsToHide.append(win)
         }
         if EdgeNotesWindowController.shared.isVisible {

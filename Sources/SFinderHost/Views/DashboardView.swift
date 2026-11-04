@@ -72,18 +72,18 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
     
     public var accentColor: Color {
         switch self {
-        case .overview: return Color(hex: "38BDF8")
-        case .permissions: return Color(hex: "10B981")
-        case .general: return Color.white.opacity(0.85)
-        case .ocr: return Color(hex: "38BDF8")
-        case .recorder: return Color(hex: "FB7185")
-        case .wake: return Color(hex: "F59E0B")
-        case .rename: return Color(hex: "38BDF8")
-        case .notes: return Color(hex: "F59E0B")
-        case .snap: return Color.white.opacity(0.85)
-        case .menubar: return Color.white.opacity(0.85)
-        case .monitor: return Color(hex: "38BDF8")
-        case .network: return Color(hex: "38BDF8")
+        case .overview: return CFinderTheme.FeatureColor.overview
+        case .permissions: return CFinderTheme.FeatureColor.permissions
+        case .general: return CFinderTheme.FeatureColor.general
+        case .ocr: return CFinderTheme.FeatureColor.ocr
+        case .recorder: return CFinderTheme.FeatureColor.recorder
+        case .wake: return CFinderTheme.FeatureColor.wake
+        case .rename: return CFinderTheme.FeatureColor.rename
+        case .notes: return CFinderTheme.FeatureColor.notes
+        case .snap: return CFinderTheme.FeatureColor.snap
+        case .menubar: return CFinderTheme.FeatureColor.menubar
+        case .monitor: return CFinderTheme.FeatureColor.monitor
+        case .network: return CFinderTheme.FeatureColor.network
         }
     }
 }
@@ -209,6 +209,9 @@ public struct DashboardView: View {
         .frame(width: 960, height: 650)
         .onAppear {
             ambientGlow = true
+            refreshAllStatuses()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshAllStatuses()
         }
         .onReceive(NotificationCenter.default.publisher(for: PermissionsManager.permissionsDidChangeNotification)) { _ in
@@ -454,16 +457,16 @@ struct DashboardHeaderBar: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
+                    .fill(selectedTab.accentColor.opacity(0.14))
                     .frame(width: 32, height: 32)
                     .overlay(
                         RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(selectedTab.accentColor.opacity(0.28), lineWidth: 1)
                     )
                 
                 Image(systemName: selectedTab.icon)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(selectedTab.accentColor)
             }
             
             Text(cleanHeaderTitle)
@@ -660,7 +663,7 @@ struct OverviewTabContentView: View {
                     title: "Quét chữ OCR",
                     subtitle: "Nhận diện văn bản trên màn hình và trích bảng",
                     icon: "text.viewfinder",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.ocr,
                     statusBadge: currentPresetDisplay,
                     actionLabel: "Quét ngay"
                 ) {
@@ -673,7 +676,7 @@ struct OverviewTabContentView: View {
                     title: "Ghi màn hình",
                     subtitle: recorder.isRecording ? "Đang ghi video (\(recorder.formattedDuration)). Nhấn để dừng và lưu." : "Quay 60/120fps Retina, thu âm thanh & mic",
                     icon: "record.circle.fill",
-                    accentColor: recorder.isRecording ? Color(hex: "EF4444") : CFinderTheme.primaryLight,
+                    accentColor: recorder.isRecording ? Color(hex: "EF4444") : CFinderTheme.FeatureColor.recorder,
                     statusBadge: recorder.isRecording ? "Đang ghi" : "⌥R",
                     actionLabel: recorder.isRecording ? "Dừng quay" : "Ghi ngay"
                 ) {
@@ -686,7 +689,7 @@ struct OverviewTabContentView: View {
                     title: "Chống ngủ Mac",
                     subtitle: isPowerActive ? "Đang giữ thức (\(powerTimeRemaining))" : "Ngăn máy ngủ khi tải file, render đồ hoạ",
                     icon: isPowerActive ? "bolt.fill" : "bolt.slash",
-                    accentColor: isPowerActive ? CFinderTheme.warning : CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.wake,
                     statusBadge: isPowerActive ? "Đang chạy" : "Tắt",
                     actionLabel: isPowerActive ? "Dừng thức" : "Bật thức"
                 ) {
@@ -700,7 +703,7 @@ struct OverviewTabContentView: View {
                     title: "Đổi tên tệp Finder",
                     subtitle: "Đánh số, thêm chữ, hoàn tác an toàn ⌘Z",
                     icon: "pencil.and.list.clipboard",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.rename,
                     statusBadge: "⌘⇧R",
                     actionLabel: "Mở công cụ"
                 ) {
@@ -713,7 +716,7 @@ struct OverviewTabContentView: View {
                     title: "Ghi chú mép màn hình",
                     subtitle: "Rê chuột mép phải là mở, gõ tự lưu, đồng bộ  Notes",
                     icon: "note.text",
-                    accentColor: Color(hex: "F59E0B"),
+                    accentColor: CFinderTheme.FeatureColor.notes,
                     statusBadge: "⌥N",
                     actionLabel: "Mở ghi chú"
                 ) {
@@ -726,7 +729,7 @@ struct OverviewTabContentView: View {
                     title: "Snap Areas",
                     subtitle: "Kéo mép & góc chia đôi, chia tư màn hình",
                     icon: "rectangle.split.2x2",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.snap,
                     statusBadge: "⌃⌥",
                     actionLabel: "Bố cục cửa sổ"
                 ) {
@@ -736,10 +739,36 @@ struct OverviewTabContentView: View {
                 }
                 
                 LiquidToolCard(
+                    title: "Lọc video trùng (VideoTwin)",
+                    subtitle: "Tìm & dọn video trùng lặp theo nội dung khung hình",
+                    icon: "film.stack",
+                    accentColor: CFinderTheme.FeatureColor.videoTwin,
+                    statusBadge: "Studio",
+                    actionLabel: "Mở VideoTwin"
+                ) {
+                    HostActionCoordinator.shared.presentVideoTwinStudio(urls: [])
+                } onConfigure: {
+                    HostActionCoordinator.shared.presentVideoTwinStudio(urls: [])
+                }
+                
+                LiquidToolCard(
+                    title: "So sánh & Chấm điểm Video",
+                    subtitle: "So sánh bitrate, độ phân giải và chất lượng song song",
+                    icon: "rectangle.split.2x1.fill",
+                    accentColor: CFinderTheme.FeatureColor.videoInspector,
+                    statusBadge: "So sánh",
+                    actionLabel: "Mở So sánh"
+                ) {
+                    HostActionCoordinator.shared.presentVideoInspector(urls: [])
+                } onConfigure: {
+                    HostActionCoordinator.shared.presentVideoInspector(urls: [])
+                }
+                
+                LiquidToolCard(
                     title: "Cắt & Dán Finder",
                     subtitle: "Cắt file ⌘X như Windows, dán ⌘V di chuyển",
                     icon: "scissors",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.cutPaste,
                     statusBadge: "⌘X / ⌘V",
                     actionLabel: "Đang kích hoạt"
                 ) {
@@ -752,7 +781,7 @@ struct OverviewTabContentView: View {
                     title: "Chụp ảnh cuộn",
                     subtitle: "Tự cuộn hoặc cuộn tay, ghép ảnh dài liền mạch",
                     icon: "arrow.up.and.down.and.sparkles",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.scrollCapture,
                     statusBadge: "⌥S",
                     actionLabel: "Chụp ngay"
                 ) {
@@ -765,7 +794,7 @@ struct OverviewTabContentView: View {
                     title: "Lịch sử quét OCR",
                     subtitle: "Xem lại và sao chép các đoạn văn bản đã quét",
                     icon: "clock.arrow.circlepath",
-                    accentColor: CFinderTheme.primaryLight,
+                    accentColor: CFinderTheme.FeatureColor.ocr,
                     statusBadge: "Lịch sử",
                     actionLabel: "Mở lịch sử"
                 ) {
@@ -2380,7 +2409,7 @@ struct SidebarItemButton: View {
             HStack(spacing: 9) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                    .foregroundColor(isSelected ? CFinderTheme.primaryLight : (isHovered ? .white.opacity(0.9) : .white.opacity(0.5)))
+                    .foregroundColor(isSelected ? tab.accentColor : (isHovered ? .white.opacity(0.9) : .white.opacity(0.5)))
                     .frame(width: 18)
                 
                 Text(tab.title)
@@ -2393,20 +2422,20 @@ struct SidebarItemButton: View {
                 if let badge = badge {
                     Text(badge)
                         .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                        .foregroundColor(badgeColor ?? (isSelected ? CFinderTheme.primaryLight.opacity(0.85) : .white.opacity(0.45)))
+                        .foregroundColor(badgeColor ?? (isSelected ? tab.accentColor.opacity(0.95) : .white.opacity(0.45)))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(isSelected ? CFinderTheme.primary.opacity(0.18) : Color.white.opacity(0.06)))
+                        .background(Capsule().fill(isSelected ? tab.accentColor.opacity(0.2) : Color.white.opacity(0.06)))
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? CFinderTheme.primary.opacity(0.14) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
+                    .fill(isSelected ? tab.accentColor.opacity(0.14) : (isHovered ? Color.white.opacity(0.05) : Color.clear))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(isSelected ? CFinderTheme.primaryLight.opacity(0.28) : Color.clear, lineWidth: 1)
+                            .stroke(isSelected ? tab.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
                     )
             )
         }
@@ -2460,7 +2489,7 @@ struct LiquidToolCard: View {
             HStack {
                 ZStack {
                     Circle()
-                        .fill(isHovered ? CFinderTheme.primary.opacity(0.18) : Color.white.opacity(0.06))
+                        .fill(isHovered ? accentColor.opacity(0.18) : Color.white.opacity(0.06))
                         .frame(width: 34, height: 34)
                     
                     Image(systemName: icon)
@@ -2472,10 +2501,10 @@ struct LiquidToolCard: View {
                 
                 Text(statusBadge)
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(isHovered ? CFinderTheme.primaryLight : .white.opacity(0.55))
+                    .foregroundColor(isHovered ? accentColor : .white.opacity(0.55))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2.5)
-                    .background(Capsule().fill(isHovered ? CFinderTheme.primary.opacity(0.12) : Color.white.opacity(0.06)))
+                    .background(Capsule().fill(isHovered ? accentColor.opacity(0.14) : Color.white.opacity(0.06)))
             }
             
             VStack(alignment: .leading, spacing: 3) {
@@ -2499,10 +2528,10 @@ struct LiquidToolCard: View {
                     .padding(.vertical, 5.5)
                     .background(
                         Capsule()
-                            .fill(isHovered ? CFinderTheme.primary.opacity(0.2) : Color.white.opacity(0.08))
+                            .fill(isHovered ? accentColor.opacity(0.2) : Color.white.opacity(0.08))
                             .overlay(
                                 Capsule()
-                                    .stroke(isHovered ? CFinderTheme.primaryLight.opacity(0.4) : Color.white.opacity(0.14), lineWidth: 1)
+                                    .stroke(isHovered ? accentColor.opacity(0.4) : Color.white.opacity(0.14), lineWidth: 1)
                             )
                     )
                     .buttonStyle(.plain)
@@ -2513,7 +2542,7 @@ struct LiquidToolCard: View {
                 Button(action: onConfigure) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 11.5))
-                        .foregroundColor(isHovered ? CFinderTheme.primaryLight.opacity(0.8) : .white.opacity(0.4))
+                        .foregroundColor(isHovered ? accentColor.opacity(0.8) : .white.opacity(0.4))
                         .padding(6)
                         .background(Circle().fill(Color.white.opacity(0.05)))
                 }
@@ -2526,10 +2555,10 @@ struct LiquidToolCard: View {
         .frame(minHeight: 155)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isHovered ? CFinderTheme.primary.opacity(0.06) : Color.white.opacity(0.025))
+                .fill(isHovered ? accentColor.opacity(0.07) : Color.white.opacity(0.025))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(isHovered ? CFinderTheme.primaryLight.opacity(0.3) : Color.white.opacity(0.06), lineWidth: 1)
+                        .stroke(isHovered ? accentColor.opacity(0.35) : Color.white.opacity(0.06), lineWidth: 1)
                 )
                 .shadow(color: Color.black.opacity(0.2), radius: 8, y: 3)
         )

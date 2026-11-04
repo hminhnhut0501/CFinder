@@ -4,6 +4,8 @@ import AppKit
 public enum IPCActionType: String, Codable, Sendable {
     case showBatchRenameUI = "showBatchRenameUI"
     case undoBatchRename = "undoBatchRename"
+    case scanVideoDuplicates = "scanVideoDuplicates"
+    case inspectVideo = "inspectVideo"
     case captureOCR = "captureOCR"
     case cutFiles = "cutFiles"
     case pasteFiles = "pasteFiles"

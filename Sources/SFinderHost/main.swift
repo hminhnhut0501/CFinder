@@ -213,6 +213,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             HostActionCoordinator.shared.presentOCRHistory()
         } else if url.host == "batch-rename" || url.path.contains("batch-rename") {
             HostActionCoordinator.shared.presentBatchRename(urls: [])
+        } else if url.host == "video-twin" || url.path.contains("video-twin") || url.host == "videotwin" {
+            var targetURLs: [URL] = []
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let pathsParam = components.queryItems?.first(where: { $0.name == "paths" })?.value {
+                targetURLs = pathsParam.components(separatedBy: ",").compactMap { p in
+                    p.isEmpty ? nil : URL(fileURLWithPath: p)
+                }
+            }
+            HostActionCoordinator.shared.presentVideoTwinStudio(urls: targetURLs)
+        } else if url.host == "inspect-video" || url.path.contains("inspect-video") || url.host == "video-inspector" {
+            var targetURLs: [URL] = []
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let pathsParam = components.queryItems?.first(where: { $0.name == "paths" })?.value {
+                targetURLs = pathsParam.components(separatedBy: ",").compactMap { p in
+                    p.isEmpty ? nil : URL(fileURLWithPath: p)
+                }
+            }
+            HostActionCoordinator.shared.presentVideoInspector(urls: targetURLs)
         } else if url.host == "notes" || url.path.contains("notes") || url.host == "edge-notes" {
             EdgeNotesWindowController.shared.toggleDrawer()
         } else if url.host == "wake-toggle" || url.path.contains("wake-toggle") {

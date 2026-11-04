@@ -152,6 +152,18 @@ public class FinderSync: FIFinderSync {
         renameItem.representedObject = ["targets": containerPath.isEmpty ? [] : [containerPath]]
         menu.addItem(renameItem)
         
+        let videoTwinItem = NSMenuItem(title: "Tìm video trùng lặp trong thư mục này...", action: #selector(handleScanVideoDuplicates(_:)), keyEquivalent: "")
+        videoTwinItem.image = makeWhiteIcon(systemName: "film.stack")
+        videoTwinItem.target = self
+        videoTwinItem.representedObject = ["targets": containerPath.isEmpty ? [] : [containerPath]]
+        menu.addItem(videoTwinItem)
+        
+        let videoInspectItem = NSMenuItem(title: "So sánh & Chấm điểm video trong thư mục này...", action: #selector(handleInspectVideo(_:)), keyEquivalent: "")
+        videoInspectItem.image = makeWhiteIcon(systemName: "arrow.left.and.right.circle")
+        videoInspectItem.target = self
+        videoInspectItem.representedObject = ["targets": containerPath.isEmpty ? [] : [containerPath]]
+        menu.addItem(videoInspectItem)
+        
         let undoItem = NSMenuItem(title: "Hoàn tác đổi tên lần trước", action: #selector(handleUndoRename(_:)), keyEquivalent: "")
         undoItem.image = makeWhiteIcon(systemName: "arrow.uturn.backward")
         undoItem.target = self
@@ -190,6 +202,26 @@ public class FinderSync: FIFinderSync {
         renameItem.representedObject = ["targets": paths]
         menu.addItem(renameItem)
         
+        let vtTitle = items.count > 1 ? "Tìm video trùng lặp (\(items.count) mục)..." : "Tìm video trùng lặp..."
+        let videoTwinItem = NSMenuItem(title: vtTitle, action: #selector(handleScanVideoDuplicates(_:)), keyEquivalent: "")
+        videoTwinItem.image = makeWhiteIcon(systemName: "film.stack")
+        videoTwinItem.target = self
+        videoTwinItem.representedObject = ["targets": paths]
+        menu.addItem(videoTwinItem)
+        
+        // Video Inspector / Intelligent Comparator
+        let videoExtensions: Set<String> = ["mp4", "mov", "m4v", "mkv", "webm", "avi", "ts", "flv", "wmv"]
+        let videoItems = items.filter { videoExtensions.contains($0.pathExtension.lowercased()) }
+        if !videoItems.isEmpty {
+            let inspectTitle = videoItems.count > 1 ? "So sánh & Chấm điểm video (\(videoItems.count) video)..." : "Xem thông số chi tiết video..."
+            let inspectIcon = videoItems.count > 1 ? "arrow.left.and.right.circle" : "info.circle"
+            let inspectItem = NSMenuItem(title: inspectTitle, action: #selector(handleInspectVideo(_:)), keyEquivalent: "")
+            inspectItem.image = makeWhiteIcon(systemName: inspectIcon)
+            inspectItem.target = self
+            inspectItem.representedObject = ["targets": videoItems.map { $0.path }]
+            menu.addItem(inspectItem)
+        }
+        
         let undoItem = NSMenuItem(title: "Hoàn tác đổi tên lần trước", action: #selector(handleUndoRename(_:)), keyEquivalent: "")
         undoItem.image = makeWhiteIcon(systemName: "arrow.uturn.backward")
         undoItem.target = self
@@ -227,6 +259,33 @@ public class FinderSync: FIFinderSync {
         
         NSLog("[SFinderSync] handleBatchRename sending %ld targets to Studio", targets.count)
         let msg = IPCMessage(actionType: .showBatchRenameUI, targetPaths: targets)
+        try? IPCHelper.shared.send(message: msg)
+    }
+    
+    @objc private func handleScanVideoDuplicates(_ sender: NSMenuItem) {
+        var targets = (sender.representedObject as? [String: Any])?["targets"] as? [String] ?? []
+        
+        // Always check selectedItemURLs at click time if targets is empty or a single folder
+        if targets.isEmpty || (targets.count == 1 && (try? URL(fileURLWithPath: targets[0]).resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true) {
+            if let currentSelection = FIFinderSyncController.default().selectedItemURLs(), !currentSelection.isEmpty {
+                targets = currentSelection.map { $0.path }
+            }
+        }
+        
+        NSLog("[SFinderSync] handleScanVideoDuplicates sending %ld targets to VideoTwin Studio", targets.count)
+        let msg = IPCMessage(actionType: .scanVideoDuplicates, targetPaths: targets)
+        try? IPCHelper.shared.send(message: msg)
+    }
+    
+    @objc private func handleInspectVideo(_ sender: NSMenuItem) {
+        var targets = (sender.representedObject as? [String: Any])?["targets"] as? [String] ?? []
+        if targets.isEmpty {
+            if let currentSelection = FIFinderSyncController.default().selectedItemURLs(), !currentSelection.isEmpty {
+                targets = currentSelection.map { $0.path }
+            }
+        }
+        NSLog("[SFinderSync] handleInspectVideo sending %ld targets to Video Inspector", targets.count)
+        let msg = IPCMessage(actionType: .inspectVideo, targetPaths: targets)
         try? IPCHelper.shared.send(message: msg)
     }
     

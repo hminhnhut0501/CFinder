@@ -94,6 +94,42 @@ public enum CFinderTheme {
         startPoint: .leading,
         endPoint: .trailing
     )
+    
+    // MARK: 6. Unified Feature Colors (Đồng bộ 100% toàn bộ hệ thống)
+    public enum FeatureColor {
+        /// Tổng quan (Dashboard Overview)
+        public static let overview = Color(hex: "38BDF8") // Sky Blue
+        /// Quyền hệ thống (Permissions)
+        public static let permissions = Color(hex: "10B981") // Emerald Green
+        /// Cài đặt chung (General Settings)
+        public static let general = Color(hex: "94A3B8") // Slate Gray
+        /// Quét chữ OCR (OCR Engine)
+        public static let ocr = Color(hex: "06B6D4") // Cyan
+        /// Ghi màn hình (Screen Recorder)
+        public static let recorder = Color(hex: "F43F5E") // Coral Rose
+        /// Chống ngủ Mac (Power / Wake)
+        public static let wake = Color(hex: "F59E0B") // Amber Gold
+        /// Đổi tên tệp (Batch Rename)
+        public static let rename = Color(hex: "8B5CF6") // Royal Purple
+        /// Ghi chú mép (Edge Notes)
+        public static let notes = Color(hex: "F97316") // Warm Orange
+        /// Snap Areas (Window Management)
+        public static let snap = Color(hex: "3B82F6") // Apple Blue
+        /// Menu Bar Icons (Hidden Bar)
+        public static let menubar = Color(hex: "EC4899") // Pink / Magenta
+        /// Theo dõi hệ thống (System Monitor)
+        public static let monitor = Color(hex: "14B8A6") // Teal / Mint
+        /// Mạng & Tốc độ (Network Monitor)
+        public static let network = Color(hex: "6366F1") // Indigo
+        /// Lọc video trùng (VideoTwin Studio)
+        public static let videoTwin = Color(hex: "0EA5E9") // Vibrant Azure Blue
+        /// So sánh & Chấm điểm Video (Video Comparator)
+        public static let videoInspector = Color(hex: "10B981") // Emerald Green
+        /// Cắt & Dán tệp Finder
+        public static let cutPaste = Color(hex: "10B981") // Emerald
+        /// Chụp ảnh cuộn
+        public static let scrollCapture = Color(hex: "EC4899") // Pink
+    }
 }
 
 // MARK: - Standard View Modifiers & Components
