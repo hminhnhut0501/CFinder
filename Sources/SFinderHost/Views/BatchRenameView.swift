@@ -443,8 +443,8 @@ public struct BatchRenameView: View {
                             Text("Bắt đầu:")
                                 .font(.system(size: 11.5))
                                 .foregroundColor(.secondary)
-                            Stepper("\(rule.startNumber)", value: $rule.startNumber, in: 0...9999)
-                                .font(.system(size: 11.5))
+                                .lineLimit(1)
+                            NumberInputField(value: $rule.startNumber, range: 0...999999)
                         }
                         
                         HStack(spacing: 4) {
@@ -1114,3 +1114,74 @@ struct RenameFooterBarView: View {
         )
     }
 }
+
+// MARK: - Number Input Field (Direct Edit + Stepper)
+
+struct NumberInputField: View {
+    @Binding var value: Int
+    var range: ClosedRange<Int> = 0...999999
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+    
+    var body: some View {
+        HStack(spacing: 2) {
+            TextField("0", text: $text)
+                .focused($isFocused)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                .multilineTextAlignment(.center)
+                .frame(width: 44)
+                .onSubmit {
+                    commitText()
+                }
+                .onChange(of: isFocused) { _, focused in
+                    if !focused {
+                        commitText()
+                    }
+                }
+                .onChange(of: text) { _, newText in
+                    let digits = newText.filter { $0.isNumber }
+                    if digits != newText {
+                        text = digits
+                    }
+                    if let num = Int(digits) {
+                        let clamped = min(max(num, range.lowerBound), range.upperBound)
+                        if value != clamped {
+                            value = clamped
+                        }
+                    }
+                }
+                .onChange(of: value) { _, newVal in
+                    let currentNum = Int(text.filter { $0.isNumber })
+                    if currentNum != newVal {
+                        text = "\(newVal)"
+                    }
+                }
+                .onAppear {
+                    text = "\(value)"
+                }
+            
+            Stepper("", value: $value, in: range)
+                .labelsHidden()
+                .controlSize(.small)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 2)
+        .padding(.vertical, 2.5)
+        .background(Color.primary.opacity(0.05))
+        .cornerRadius(6)
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12), lineWidth: 0.6))
+    }
+    
+    private func commitText() {
+        let digits = text.filter { $0.isNumber }
+        if let num = Int(digits) {
+            let clamped = min(max(num, range.lowerBound), range.upperBound)
+            value = clamped
+            text = "\(clamped)"
+        } else {
+            text = "\(value)"
+        }
+    }
+}
+
