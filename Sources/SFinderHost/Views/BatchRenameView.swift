@@ -173,11 +173,13 @@ public struct BatchRenameView: View {
                     .foregroundColor(CFinderTheme.FeatureColor.rename)
             }
             
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("Đổi tên tệp hàng loạt")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                    
                     Text("STUDIO")
                         .font(.system(size: 8.5, weight: .heavy, design: .rounded))
                         .padding(.horizontal, 5)
@@ -189,80 +191,78 @@ public struct BatchRenameView: View {
                         .foregroundColor(.white)
                 }
                 
-                Text("Đổi tên nhanh, đánh số thứ tự và định dạng an toàn trên Finder")
+                Text(currentURLs.isEmpty ? "Đổi tên nhanh và an toàn trên macOS Finder" : "\(currentURLs.count) tệp được nạp")
                     .font(.system(size: 11))
                     .foregroundColor(Color.white.opacity(0.5))
+                    .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             
-            // Search / Filter inside list
-            HStack(spacing: 6) {
-                Image(systemName: "line.3.horizontal.decrease.circle")
-                    .foregroundColor(.white.opacity(0.5))
-                    .font(.system(size: 12))
-                TextField("Lọc danh sách tệp...", text: $searchText)
+            // Search / Filter inside list (Compact)
+            HStack(spacing: 5) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.white.opacity(0.45))
+                    .font(.system(size: 11))
+                TextField("Lọc tệp...", text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11.5))
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.white.opacity(0.5))
-                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.45))
+                            .font(.system(size: 10))
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
                 }
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .frame(width: 170)
+            .padding(.horizontal, 7)
+            .frame(width: 120, height: 28)
             .background(Color.white.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .stroke(Color.white.opacity(0.08), lineWidth: 1)
             )
             
-            // Add files button
+            // Add files button (Compact Icon + Label)
             Button(action: handleChooseFiles) {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .bold))
                     Text("Thêm tệp")
                         .font(.system(size: 11.5, weight: .medium))
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 9)
+                .frame(height: 28)
                 .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
+            .help("Thêm tệp vào danh sách đổi tên")
             
-            // Clear files button
+            // Clear files button (Icon-only with tooltip)
             if !currentURLs.isEmpty {
                 Button(action: handleClearFiles) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .bold))
-                        Text("Xóa danh sách")
-                            .font(.system(size: 11.5, weight: .medium))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.red.opacity(0.12))
-                    .foregroundColor(Color.red.opacity(0.9))
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.red.opacity(0.25), lineWidth: 1))
+                    Image(systemName: "trash")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundColor(Color(hex: "F43F5E"))
+                        .frame(width: 28, height: 28)
+                        .background(Color(hex: "F43F5E").opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color(hex: "F43F5E").opacity(0.25), lineWidth: 1))
                 }
                 .buttonStyle(.plain)
                 .focusable(false)
                 .help("Xóa toàn bộ tệp trong danh sách về trạng thái trống")
             }
             
-            // Clear all original name characters toggle
+            // Clear all original name characters toggle (Icon + Compact Label)
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     rule.clearOriginalName.toggle()
@@ -274,57 +274,50 @@ public struct BatchRenameView: View {
                     isSuccess = true
                 }
             }) {
-                HStack(spacing: 5) {
-                    Image(systemName: rule.clearOriginalName ? "checkmark.circle.fill" : "eraser.line.dashed")
+                HStack(spacing: 4) {
+                    Image(systemName: rule.clearOriginalName ? "eraser.fill" : "eraser.line.dashed")
                         .font(.system(size: 11, weight: .bold))
-                    Text(rule.clearOriginalName ? "Đang xóa tên cũ" : "Xóa hết tên cũ")
+                    Text("Xóa tên cũ")
                         .font(.system(size: 11.5, weight: .medium))
+                        .lineLimit(1)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(rule.clearOriginalName ? Color.red.opacity(0.15) : Color.white.opacity(0.06))
+                .padding(.horizontal, 9)
+                .frame(height: 28)
+                .background(rule.clearOriginalName ? Color(hex: "F43F5E").opacity(0.18) : Color.white.opacity(0.06))
                 .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .white.opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(rule.clearOriginalName ? Color.red.opacity(0.4) : Color.white.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(rule.clearOriginalName ? Color(hex: "F43F5E").opacity(0.45) : Color.white.opacity(0.12), lineWidth: 1)
                 )
             }
             .buttonStyle(.plain)
             .focusable(false)
-            .help("Xóa toàn bộ ký tự tên gốc của các tệp để đặt tên mới từ đầu")
+            .help(rule.clearOriginalName ? "Đang xóa sạch ký tự tên cũ (Bấm để giữ lại tên gốc)" : "Xóa toàn bộ ký tự tên cũ để đặt tên mới từ đầu")
             
-            // Reset rule button
+            // Reset rule button (Icon-only)
             Button(action: handleResetFormat) {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Đặt lại")
-                        .font(.system(size: 11.5, weight: .medium))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.75))
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
             .help("Khôi phục toàn bộ tùy chọn đổi tên về mặc định")
             
-            // Undo button
+            // Undo button (Icon-only)
             Button(action: handleUndo) {
-                HStack(spacing: 5) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Hoàn tác")
-                        .font(.system(size: 11.5, weight: .medium))
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.75))
+                    .frame(width: 28, height: 28)
+                    .background(Color.white.opacity(0.06))
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(false)
@@ -335,7 +328,7 @@ public struct BatchRenameView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white.opacity(0.55))
-                    .padding(7)
+                    .frame(width: 28, height: 28)
                     .background(
                         Circle()
                             .fill(Color.white.opacity(0.04))
@@ -367,6 +360,7 @@ public struct BatchRenameView: View {
                             .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
                         Text(tab.rawValue)
                             .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                            .lineLimit(1)
                     }
                     .padding(.horizontal, 13)
                     .padding(.vertical, 7)
@@ -407,17 +401,21 @@ public struct BatchRenameView: View {
             Group {
                 switch selectedTab {
                 case .replace:
-                    HStack(spacing: 16) {
-                        glassInputField(title: "Tìm kiếm:", placeholder: "Từ khóa cần thay thế...", text: $rule.findText)
+                    HStack(spacing: 12) {
+                        glassInputField(title: "Tìm:", placeholder: "Từ khóa cần thay thế...", text: $rule.findText)
                         glassInputField(title: "Thay bằng:", placeholder: "Từ mới (để trống để xóa)...", text: $rule.replaceText)
                         
                         Toggle("Regex", isOn: $rule.isRegex)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5))
+                            .lineLimit(1)
                         
                         Toggle("Phân biệt Hoa/thường", isOn: $rule.matchCase)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5))
+                            .lineLimit(1)
+                        
+                        Spacer()
                     }
                     
                 case .numbering:
@@ -427,141 +425,139 @@ public struct BatchRenameView: View {
                                 Text(fmt.rawValue).tag(fmt)
                             }
                         }
-                        .frame(width: 135)
+                        .frame(width: 125)
                         
                         Picker("Vị trí:", selection: $rule.numberingPosition) {
                             ForEach(NumberingPosition.allCases, id: \.self) { pos in
                                 Text(pos.rawValue).tag(pos)
                             }
                         }
-                        .frame(width: 190)
+                        .frame(width: 170)
                         
                         if rule.numberingPosition == .replace || rule.clearOriginalName {
                             glassInputField(title: "Tên mới:", placeholder: "Để trống để chỉ lấy số...", text: $rule.customBaseName)
-                                .frame(width: 190)
+                                .frame(width: 160)
                         }
                         
                         HStack(spacing: 4) {
                             Text("Bắt đầu:")
                                 .font(.system(size: 11.5))
+                                .foregroundColor(.secondary)
                             Stepper("\(rule.startNumber)", value: $rule.startNumber, in: 0...9999)
                                 .font(.system(size: 11.5))
                         }
                         
                         HStack(spacing: 4) {
-                            Text("Ký tự nối:")
+                            Text("Nối:")
                                 .font(.system(size: 11.5))
+                                .foregroundColor(.secondary)
                             TextField("_", text: $rule.numberingSeparator)
                                 .textFieldStyle(.plain)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(Color.primary.opacity(0.06))
                                 .cornerRadius(6)
-                                .frame(width: 45)
+                                .frame(width: 36)
                         }
                         
                         Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
                             .help("Xóa toàn bộ ký tự tên gốc để thay bằng tên mới hoặc chỉ số thứ tự")
                         
                         Toggle("Bật số", isOn: $rule.enableNumbering)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
                         
                         Spacer()
                     }
                     
                 case .prefixSuffix:
-                    HStack(spacing: 14) {
-                        glassInputField(title: "Thêm vào đầu (Tiền tố):", placeholder: "Ví dụ: Final_, Tailieu_...", text: $rule.prefix)
-                        glassInputField(title: "Thêm vào đuôi (Hậu tố):", placeholder: "Ví dụ: _v1.0, _HD...", text: $rule.suffix)
+                    HStack(spacing: 12) {
+                        glassInputField(title: "Tiền tố:", placeholder: "Ví dụ: Final_, Tailieu_...", text: $rule.prefix)
+                        glassInputField(title: "Hậu tố:", placeholder: "Ví dụ: _v1.0, _HD...", text: $rule.suffix)
                         
                         Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
                             .toggleStyle(.checkbox)
                             .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
                             .help("Xóa sạch ký tự tên gốc và chỉ giữ lại tiền tố / hậu tố vừa nhập")
                         
-                        if !rule.prefix.isEmpty || !rule.suffix.isEmpty {
-                            Button(action: {
-                                rule.prefix = ""
-                                rule.suffix = ""
-                            }) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 11))
-                                    Text("Xóa text")
-                                        .font(.system(size: 11))
-                                }
-                                .foregroundColor(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
                         Spacer()
                     }
                     
                 case .caseTransform:
-                    HStack(spacing: 16) {
-                        Text("Chuyển kiểu chữ:")
-                            .font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 14) {
+                        Text("Kiểu chữ:")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(.secondary)
                         
                         Picker("", selection: $rule.caseTransform) {
                             ForEach(CaseTransform.allCases, id: \.self) { c in
                                 Text(c.rawValue).tag(c)
                             }
                         }
-                        .frame(width: 240)
+                        .frame(width: 210)
                         
-                        Text("Áp dụng lên phần tên chính, bảo vệ nguyên vẹn phần mở rộng (.ext)")
+                        Text("Chỉ tác động phần tên chính, giữ nguyên đuôi tệp")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
+                            .lineLimit(1)
                         
                         Spacer()
                     }
                     
                 case .cleanups:
-                    HStack(spacing: 16) {
-                        Toggle("Bỏ dấu tiếng Việt (Hàng Cú -> Hang Cu)", isOn: $rule.removeAccents)
+                    HStack(spacing: 14) {
+                        Toggle("Bỏ dấu tiếng Việt", isOn: $rule.removeAccents)
                             .toggleStyle(.checkbox)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
                         
-                        Toggle("Khoảng trắng -> Gạch ngang (-)", isOn: $rule.replaceSpacesWithDash)
+                        Toggle("Dấu cách -> Gạch ngang (-)", isOn: $rule.replaceSpacesWithDash)
                             .toggleStyle(.checkbox)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
                             .onChange(of: rule.replaceSpacesWithDash) { _, val in
                                 if val { rule.replaceSpacesWithUnderscore = false }
                             }
                         
-                        Toggle("Khoảng trắng -> Gạch dưới (_)", isOn: $rule.replaceSpacesWithUnderscore)
+                        Toggle("Dấu cách -> Gạch dưới (_)", isOn: $rule.replaceSpacesWithUnderscore)
                             .toggleStyle(.checkbox)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
                             .onChange(of: rule.replaceSpacesWithUnderscore) { _, val in
                                 if val { rule.replaceSpacesWithDash = false }
                             }
                         
                         Toggle("Cắt khoảng trắng thừa", isOn: $rule.trimSpaces)
                             .toggleStyle(.checkbox)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
                         
-                        Toggle("Xóa sạch toàn bộ ký tự tên cũ (Chỉ giữ đuôi tệp)", isOn: $rule.clearOriginalName)
+                        Toggle("Xóa sạch tên cũ (Chỉ giữ đuôi)", isOn: $rule.clearOriginalName)
                             .toggleStyle(.checkbox)
-                            .font(.system(size: 12, weight: rule.clearOriginalName ? .bold : .medium))
+                            .font(.system(size: 11.5, weight: rule.clearOriginalName ? .bold : .medium))
                             .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .primary)
+                            .lineLimit(1)
                         
                         Spacer()
                     }
                     
                 case .fileExtension:
-                    HStack(spacing: 16) {
-                        Text("Xử lý đuôi tệp:")
-                            .font(.system(size: 12, weight: .medium))
+                    HStack(spacing: 14) {
+                        Text("Đuôi tệp:")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(.secondary)
                         
                         Picker("", selection: $rule.extensionTransform) {
                             ForEach(ExtensionTransform.allCases, id: \.self) { ext in
                                 Text(ext.rawValue).tag(ext)
                             }
                         }
-                        .frame(width: 210)
+                        .frame(width: 190)
                         
                         if rule.extensionTransform == .custom {
                             HStack(spacing: 4) {
@@ -1072,6 +1068,7 @@ struct RenameFooterBarView: View {
                     }
                     Text(changedCount > 0 ? "Áp dụng đổi tên (\(changedCount) tệp)" : "Áp dụng đổi tên")
                         .font(.system(size: 12, weight: .bold))
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 8)

@@ -128,6 +128,7 @@ public struct VideoInspectorMasterView: View {
                     .foregroundColor(Color.white.opacity(0.5))
                     .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             

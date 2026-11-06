@@ -188,6 +188,7 @@ public struct VideoTwinStudioView: View {
                     Text("VideoTwin Studio")
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
+                        .lineLimit(1)
                     
                     if viewModel.isScanning {
                         HStack(spacing: 4) {
@@ -196,6 +197,7 @@ public struct VideoTwinStudioView: View {
                             Text(viewModel.activity)
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(CFinderTheme.FeatureColor.videoTwin)
+                                .lineLimit(1)
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2.5)
@@ -207,6 +209,7 @@ public struct VideoTwinStudioView: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2.5)
                             .background(Capsule().fill(CFinderTheme.FeatureColor.permissions.opacity(0.14)))
+                            .lineLimit(1)
                     }
                 }
                 
@@ -216,6 +219,7 @@ public struct VideoTwinStudioView: View {
                     .foregroundColor(Color.white.opacity(0.5))
                     .lineLimit(1)
             }
+            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             
