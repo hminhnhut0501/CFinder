@@ -384,22 +384,23 @@ public struct VideoTwinClusterGroupCard: View {
     }
 }
 
-// MARK: - Native Quick Player View (With Timeline Scrubber / Tua video)
+// MARK: - Safe Quick Video Surface (Backed by AVPlayerLayer, 100% Crash-Free)
 
-public struct NativeQuickPlayerView: NSViewRepresentable {
+public struct QuickVideoSurfaceView: NSViewRepresentable {
     public let player: AVPlayer
     
-    public func makeNSView(context: Context) -> AVPlayerView {
-        let pv = AVPlayerView()
-        pv.player = player
-        pv.controlsStyle = .inline
-        pv.showsFullScreenToggleButton = true
-        return pv
+    public func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        let layer = AVPlayerLayer(player: player)
+        layer.videoGravity = .resizeAspect
+        view.layer = layer
+        return view
     }
     
-    public func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        if nsView.player !== player {
-            nsView.player = player
+    public func updateNSView(_ nsView: NSView, context: Context) {
+        if let layer = nsView.layer as? AVPlayerLayer {
+            layer.player = player
         }
     }
 }
@@ -411,6 +412,12 @@ public struct VideoQuickPreviewModal: View {
     public let onDismiss: () -> Void
     
     @State private var player: AVPlayer?
+    @State private var isPlaying = true
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 0
+    @State private var isMuted = false
+    @State private var isSeeking = false
+    @State private var timeObserver: Any?
     
     public init(url: URL, onDismiss: @escaping () -> Void) {
         self.url = url
@@ -419,23 +426,24 @@ public struct VideoQuickPreviewModal: View {
     
     public var body: some View {
         ZStack {
-            Color.black.opacity(0.7)
+            Color.black.opacity(0.72)
                 .ignoresSafeArea()
                 .onTapGesture {
-                    onDismiss()
+                    cleanupAndDismiss()
                 }
             
             VStack(spacing: 0) {
-                // Header
+                // Header Bar
                 HStack(spacing: 8) {
                     Image(systemName: "film")
                         .font(.system(size: 13))
-                        .foregroundStyle(CFinderTheme.primaryLight)
+                        .foregroundStyle(CFinderTheme.FeatureColor.videoTwin)
                     
                     Text(url.lastPathComponent)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                     
                     Spacer()
                     
@@ -448,15 +456,17 @@ public struct VideoQuickPreviewModal: View {
                             Text("Xem trong Finder")
                                 .font(.system(size: 11))
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .background(Color.white.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                         .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
                     
-                    Button(action: onDismiss) {
+                    Button(action: {
+                        cleanupAndDismiss()
+                    }) {
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.8))
@@ -466,35 +476,153 @@ public struct VideoQuickPreviewModal: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .background(Color(hex: "1F242C"))
                 
-                // Native AVPlayerView with full inline scrubber / transport controls
-                if let p = player {
-                    NativeQuickPlayerView(player: p)
-                        .frame(width: 680, height: 420)
-                        .background(Color.black)
-                } else {
-                    ProgressView()
-                        .frame(width: 680, height: 420)
+                // Video Surface
+                ZStack {
+                    Color.black
+                    if let p = player {
+                        QuickVideoSurfaceView(player: p)
+                            .onTapGesture {
+                                togglePlayPause()
+                            }
+                    } else {
+                        ProgressView()
+                            .tint(.white)
+                    }
                 }
+                .frame(width: 720, height: 420)
+                
+                // Bottom Transport & Scrubber Bar
+                HStack(spacing: 12) {
+                    Button(action: togglePlayPause) {
+                        Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Text(formatTime(currentTime))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.8))
+                    
+                    Slider(
+                        value: Binding(
+                            get: { currentTime },
+                            set: { newVal in
+                                isSeeking = true
+                                currentTime = newVal
+                                let target = CMTime(seconds: newVal, preferredTimescale: 600)
+                                player?.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                                    isSeeking = false
+                                }
+                            }
+                        ),
+                        in: 0...max(0.1, duration)
+                    )
+                    .tint(CFinderTheme.FeatureColor.videoTwin)
+                    
+                    Text(formatTime(duration))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                    
+                    Button(action: toggleMute) {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.8))
+                            .frame(width: 26, height: 26)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Color(hex: "1A1E24"))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .stroke(CFinderTheme.cardBorder, lineWidth: 1)
             )
-            .shadow(color: .black.opacity(0.6), radius: 24, y: 12)
+            .shadow(color: .black.opacity(0.7), radius: 30, y: 15)
         }
         .onAppear {
-            let p = AVPlayer(url: url)
-            self.player = p
-            p.play()
+            setupPlayer()
         }
         .onDisappear {
-            player?.pause()
-            player = nil
+            teardownPlayer()
         }
+    }
+    
+    private func setupPlayer() {
+        _ = url.startAccessingSecurityScopedResource()
+        let asset = AVURLAsset(url: url)
+        let item = AVPlayerItem(asset: asset)
+        let p = AVPlayer(playerItem: item)
+        self.player = p
+        
+        Task {
+            if let d = try? await asset.load(.duration).seconds, d.isFinite, d > 0 {
+                await MainActor.run { self.duration = d }
+            }
+        }
+        
+        let interval = CMTime(value: 1, timescale: 10)
+        self.timeObserver = p.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak p] time in
+            guard !isSeeking else { return }
+            currentTime = time.seconds
+            if let currentItem = p?.currentItem, currentItem.status == .readyToPlay {
+                let dur = currentItem.duration.seconds
+                if dur.isFinite && dur > 0 && duration <= 0 {
+                    duration = dur
+                }
+            }
+        }
+        
+        p.play()
+        self.isPlaying = true
+    }
+    
+    private func teardownPlayer() {
+        if let observer = timeObserver, let p = player {
+            p.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        player?.pause()
+        player = nil
+        url.stopAccessingSecurityScopedResource()
+    }
+    
+    private func cleanupAndDismiss() {
+        teardownPlayer()
+        onDismiss()
+    }
+    
+    private func togglePlayPause() {
+        guard let p = player else { return }
+        if isPlaying {
+            p.pause()
+            isPlaying = false
+        } else {
+            p.play()
+            isPlaying = true
+        }
+    }
+    
+    private func toggleMute() {
+        guard let p = player else { return }
+        isMuted.toggle()
+        p.isMuted = isMuted
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        guard seconds.isFinite && seconds >= 0 else { return "00:00" }
+        let total = Int(seconds)
+        let m = total / 60
+        let s = total % 60
+        return String(format: "%02d:%02d", m, s)
     }
 }

@@ -320,8 +320,9 @@ public final class FolderScanner: ObservableObject {
             try Task.checkCancellation()
             guard let a = byID[pair.assetAID], let b = byID[pair.assetBID] else { continue }
             if Date().timeIntervalSince(lastPairUpdate) >= 0.1 {
+            let label = Self.compactPairActivity(a: a.path.lastPathComponent, b: b.path.lastPathComponent, current: checked + 1, total: pairs.count)
             await MainActor.run {
-                self.activity = "Comparing " + a.path.lastPathComponent + " ↔ " + b.path.lastPathComponent
+                self.activity = label
                 self.lastActivityAt = Date()
             }
             }
@@ -346,7 +347,8 @@ public final class FolderScanner: ObservableObject {
             try Task.checkCancellation()
             await pauseToken.checkPause()
             guard let a = byID[match.assetAID], let b = byID[match.assetBID] else { continue }
-            await MainActor.run { self.activity = "Checking added overlays: " + a.path.lastPathComponent; self.lastActivityAt = Date() }
+            let overlayName = Self.truncateFilename(a.path.lastPathComponent, maxLen: 18)
+            await MainActor.run { self.activity = "Kiểm tra chi tiết: \(overlayName)"; self.lastActivityAt = Date() }
             if let (assessmentA, assessmentB) = try await watermarkAnalyzer.analyze(a, b, match: match) {
                 for (asset, raw) in [(a, assessmentA), (b, assessmentB)] {
                     var assessment = raw
@@ -382,6 +384,23 @@ public final class FolderScanner: ObservableObject {
             self.session.progress.nearDuplicates = nearCount
             self.session.progress.reclaimableBytes = reclaimable
         }
+    }
+    
+    // MARK: - Safe Filename Truncation for Compact Activity Labels
+    
+    nonisolated public static func compactPairActivity(a: String, b: String, current: Int, total: Int) -> String {
+        let nameA = truncateFilename(a, maxLen: 14)
+        let nameB = truncateFilename(b, maxLen: 14)
+        return "So sánh (\(current)/\(total)): \(nameA) ↔ \(nameB)"
+    }
+    
+    nonisolated public static func truncateFilename(_ name: String, maxLen: Int = 16) -> String {
+        guard name.count > maxLen else { return name }
+        let ext = (name as NSString).pathExtension
+        let base = (name as NSString).deletingPathExtension
+        let keep = max(3, maxLen - (ext.isEmpty ? 3 : ext.count + 4))
+        let prefix = String(base.prefix(keep))
+        return ext.isEmpty ? "\(prefix)..." : "\(prefix)...\(ext)"
     }
 }
 

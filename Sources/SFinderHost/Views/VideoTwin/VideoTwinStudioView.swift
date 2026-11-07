@@ -79,14 +79,11 @@ public struct VideoTwinStudioView: View {
             // Quick Preview Player Modal
             if let quickURL = viewModel.quickViewURL {
                 VideoQuickPreviewModal(url: quickURL) {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
                         viewModel.quickViewURL = nil
                     }
                 }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.92).combined(with: .opacity),
-                    removal: .scale(scale: 0.96).combined(with: .opacity)
-                ))
+                .transition(.opacity)
                 .zIndex(15)
             }
             
@@ -201,6 +198,7 @@ public struct VideoTwinStudioView: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white)
                         .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                     
                     if viewModel.isScanning {
                         HStack(spacing: 4) {
@@ -210,9 +208,11 @@ public struct VideoTwinStudioView: View {
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(CFinderTheme.FeatureColor.videoTwin)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 2.5)
+                        .frame(maxWidth: 180)
                         .background(Capsule().fill(CFinderTheme.FeatureColor.videoTwin.opacity(0.14)))
                     } else {
                         Text("Đã quét xong")
@@ -222,9 +222,9 @@ public struct VideoTwinStudioView: View {
                             .padding(.vertical, 2.5)
                             .background(Capsule().fill(CFinderTheme.FeatureColor.permissions.opacity(0.14)))
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                 }
-                .fixedSize(horizontal: true, vertical: false)
                 
                 // Targets path (Compact, never overflows header)
                 Text(headerSubtitle)
@@ -386,6 +386,9 @@ public struct VideoTwinStudioView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(CFinderTheme.textMuted)
                 .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 520)
             
             Spacer()
         }
