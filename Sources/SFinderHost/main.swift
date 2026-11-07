@@ -40,6 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         _ = HostActionCoordinator.shared
         _ = FloatingHUDController.shared
         
+        // Pre-warm Vision OCR engine in background to prevent first-time lag
+        ScreenOCREngine.shared.warmup()
+        
         // Setup status bar item with Smart Power Management
         setupStatusItem()
         
@@ -259,17 +262,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         
         updateStatusItemAppearance()
         
-        // Listen to PowerManager state changes in real time
-        powerCancellable = Publishers.Merge4(
+        // Listen to PowerManager and NetworkSpeedMonitor state changes in real time
+        let powerPublisher = Publishers.Merge4(
             PowerManager.shared.$isActive.map { _ in () },
             PowerManager.shared.$remainingSeconds.map { _ in () },
             PowerManager.shared.$currentSession.map { _ in () },
             PowerManager.shared.$isSleepTimerActive.map { _ in () }
         )
-        .receive(on: DispatchQueue.main)
-        .sink { [weak self] in
-            self?.updateStatusItemAppearance()
-        }
+        
+        let netSpeedPublisher = Publishers.Merge4(
+            NetworkSpeedMonitor.shared.$downloadSpeedBytesPerSec.map { _ in () },
+            NetworkSpeedMonitor.shared.$uploadSpeedBytesPerSec.map { _ in () },
+            NetworkSpeedMonitor.shared.$countdownWarningSeconds.map { _ in () },
+            NetworkSpeedMonitor.shared.$consecutiveIdleSeconds.map { _ in () }
+        )
+        
+        powerCancellable = Publishers.Merge(powerPublisher, netSpeedPublisher)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] in
+                self?.updateStatusItemAppearance()
+            }
     }
     
     private func updateStatusItemAppearance() {
@@ -571,17 +583,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, 1, &eventType, nil, &carbonEventHandler)
         
         // 2. Global NSEvent monitor
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let key = event.charactersIgnoringModifiers?.lowercased()
             let preset = ScreenOCREngine.shared.currentPreset
             
-            // Check current dynamic OCR shortcut or ⌥C fallback
-            if (event.keyCode == preset.keyCode && flags.rawValue & 0xFFFF0000 == preset.modifiers) || (flags == [.option] && (event.keyCode == 8 || key == "c")) {
-                DispatchQueue.main.async {
-                    Task {
-                        _ = try? await ScreenOCREngine.shared.captureScreenInteractively()
+            // Check current dynamic OCR shortcut (only fallback if Carbon hotkey is not registered)
+            if self?.carbonHotKeyRef == nil {
+                if (event.keyCode == preset.keyCode && flags.rawValue & 0xFFFF0000 == preset.modifiers) || (flags == [.option] && (event.keyCode == 8 || key == "c")) {
+                    DispatchQueue.main.async {
+                        Task {
+                            _ = try? await ScreenOCREngine.shared.captureScreenInteractively()
+                        }
                     }
+                    return
                 }
             }
             // ⌘D: Open SFinder Dashboard

@@ -440,7 +440,15 @@ public final class PowerManager: ObservableObject {
         case .appRunning:
             return "App"
         case .networkIdle:
-            return "↓\(NetworkSpeedMonitor.shared.formattedDownloadSpeed)"
+            let monitor = NetworkSpeedMonitor.shared
+            if let warn = monitor.countdownWarningSeconds {
+                return "⚠️\(warn)s"
+            }
+            if monitor.monitorDirection == .both {
+                return "↓\(monitor.formattedDownloadSpeed) ↑\(monitor.formattedUploadSpeed)"
+            } else {
+                return "↓\(monitor.formattedDownloadSpeed)"
+            }
         case .none:
             return nil
         }

@@ -48,6 +48,23 @@ public struct OCRHistoryEntry: Codable, Identifiable, Hashable, Sendable {
 public final class ScreenOCREngine: @unchecked Sendable {
     public static let shared = ScreenOCREngine()
     
+    private let captureLock = NSLock()
+    private var isCapturing = false
+    
+    private func beginCapture() -> Bool {
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        if isCapturing { return false }
+        isCapturing = true
+        return true
+    }
+    
+    private func endCapture() {
+        captureLock.lock()
+        defer { captureLock.unlock() }
+        isCapturing = false
+    }
+    
     private let defaults = UserDefaults.standard
     private let historyKey = "com.sfinder.ocr.recentHistory"
     private let fullHistoryKey = "com.sfinder.ocr.fullHistoryEntries"
@@ -190,21 +207,65 @@ public final class ScreenOCREngine: @unchecked Sendable {
     
     private init() {}
     
+    // MARK: - Model Warmup (Tránh lag / delay lần đầu mở app)
+    
+    public func warmup() {
+        Task.detached(priority: .background) {
+            let width = 32
+            let height = 32
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            var rawData = [UInt8](repeating: 255, count: width * height * 4)
+            guard let context = CGContext(
+                data: &rawData,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ), let dummyCG = context.makeImage() else {
+                return
+            }
+            
+            let req = VNRecognizeTextRequest()
+            req.recognitionLevel = .accurate
+            req.recognitionLanguages = ["vi-VT", "en-US"]
+            req.usesLanguageCorrection = true
+            req.automaticallyDetectsLanguage = false
+            
+            let handler = VNImageRequestHandler(cgImage: dummyCG, options: [:])
+            try? handler.perform([req])
+            NSLog("[ScreenOCREngine] Vision OCR models pre-warmed successfully.")
+        }
+    }
+    
     // MARK: - Core Recognition Engine
     
     public func recognize(image: CGImage) async throws -> String {
-        // 1. Check for Barcodes / QR Code if enabled
-        if detectQR {
-            if let barcodeResult = try? await recognizeBarcodes(image: image), !barcodeResult.isEmpty {
-                return barcodeResult
-            }
-        }
-        
-        // 2. Perform OCR Text Recognition with Apple Vision
         return try await withCheckedThrowingContinuation { continuation in
-            let request = VNRecognizeTextRequest { [weak self] request, error in
+            var barcodePayload: String? = nil
+            var barcodeRequest: VNDetectBarcodesRequest? = nil
+            
+            if self.detectQR {
+                barcodeRequest = VNDetectBarcodesRequest { request, _ in
+                    if let results = request.results as? [VNBarcodeObservation], !results.isEmpty {
+                        let payloads = results.compactMap { $0.payloadStringValue }
+                        if let first = payloads.first, !first.isEmpty {
+                            barcodePayload = first
+                        }
+                    }
+                }
+            }
+            
+            let textRequest = VNRecognizeTextRequest { [weak self] request, error in
                 if let error = error {
                     continuation.resume(throwing: error)
+                    return
+                }
+                
+                // If barcode / QR found, prefer it
+                if let barcode = barcodePayload, !barcode.isEmpty {
+                    continuation.resume(returning: barcode)
                     return
                 }
                 
@@ -251,15 +312,20 @@ public final class ScreenOCREngine: @unchecked Sendable {
                 continuation.resume(returning: recognizedText)
             }
             
-            // Maximum accuracy with dedicated Vietnamese language model
-            request.recognitionLevel = .accurate
-            request.recognitionLanguages = ["vi-VN", "en-US", "vi"]
-            request.usesLanguageCorrection = true
-            request.automaticallyDetectsLanguage = true
+            // Maximum accuracy with dedicated Vietnamese & English language models
+            textRequest.recognitionLevel = .accurate
+            textRequest.recognitionLanguages = ["vi-VT", "en-US"]
+            textRequest.usesLanguageCorrection = true
+            textRequest.automaticallyDetectsLanguage = false
+            
+            var requests: [VNRequest] = [textRequest]
+            if let br = barcodeRequest {
+                requests.append(br)
+            }
             
             let handler = VNImageRequestHandler(cgImage: image, options: [:])
             do {
-                try handler.perform([request])
+                try handler.perform(requests)
             } catch {
                 continuation.resume(throwing: error)
             }
@@ -330,17 +396,32 @@ public final class ScreenOCREngine: @unchecked Sendable {
     // MARK: - Interactive Screen Capture (Single Region)
     
     public func captureScreenInteractively() async throws -> String {
+        guard beginCapture() else {
+            NSLog("[ScreenOCREngine] Interactive capture already in progress, ignoring duplicate call.")
+            return ""
+        }
+        defer {
+            endCapture()
+        }
+        
         let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("sfinder_ocr_\(UUID().uuidString).png")
         defer {
             try? FileManager.default.removeItem(at: tempURL)
         }
         
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-i", "-x", tempURL.path]
-        
-        try process.run()
-        process.waitUntilExit()
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-i", "-x", tempURL.path]
+            process.terminationHandler = { _ in
+                continuation.resume()
+            }
+            do {
+                try process.run()
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
         
         guard FileManager.default.fileExists(atPath: tempURL.path) else {
             return ""
@@ -370,12 +451,19 @@ public final class ScreenOCREngine: @unchecked Sendable {
         for regionIndex in 1...10 {
             let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("sfinder_multi_\(regionIndex)_\(UUID().uuidString).png")
             
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            process.arguments = ["-i", "-x", tempURL.path]
-            
-            try process.run()
-            process.waitUntilExit()
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                process.arguments = ["-i", "-x", tempURL.path]
+                process.terminationHandler = { _ in
+                    continuation.resume()
+                }
+                do {
+                    try process.run()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
             
             // If user pressed Esc, finish multi-region session
             guard FileManager.default.fileExists(atPath: tempURL.path) else {

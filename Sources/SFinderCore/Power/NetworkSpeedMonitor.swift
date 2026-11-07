@@ -115,7 +115,16 @@ public final class NetworkSpeedMonitor: ObservableObject {
         self.countdownWarningSeconds = nil
         self.isMonitoring = true
         
-        self.timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.sampleNetwork()
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        self.timer = t
+        
+        // Immediate initial sample after 0.2s so speed displays right away
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             Task { @MainActor [weak self] in
                 self?.sampleNetwork()
             }
@@ -211,7 +220,7 @@ public final class NetworkSpeedMonitor: ObservableObject {
     private func startWarningCountdown(action: SystemPowerAction) {
         countdownWarningSeconds = 10
         warningTimer?.invalidate()
-        warningTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        let wt = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if let sec = self.countdownWarningSeconds, sec > 1 {
@@ -225,6 +234,8 @@ public final class NetworkSpeedMonitor: ObservableObject {
                 }
             }
         }
+        RunLoop.main.add(wt, forMode: .common)
+        self.warningTimer = wt
     }
     
     // MARK: - Formatters & UI Helpers
