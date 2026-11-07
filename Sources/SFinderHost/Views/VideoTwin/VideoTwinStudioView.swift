@@ -167,6 +167,18 @@ public struct VideoTwinStudioView: View {
     
     // MARK: - Header
     
+    private var headerSubtitle: String {
+        if urls.isEmpty {
+            return "Tìm và dọn dẹp video trùng lặp thông minh"
+        } else if urls.count == 1 {
+            return urls[0].lastPathComponent
+        } else if urls.count == 2 {
+            return "\(urls[0].lastPathComponent), \(urls[1].lastPathComponent)"
+        } else {
+            return "\(urls.count) video được phân tích quét trùng lặp"
+        }
+    }
+    
     private var headerBar: some View {
         HStack(spacing: 12) {
             // Squircle Brand Badge (Dashboard style)
@@ -212,14 +224,15 @@ public struct VideoTwinStudioView: View {
                             .lineLimit(1)
                     }
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 
-                // Targets path
-                Text(urls.map { $0.lastPathComponent }.joined(separator: ", "))
+                // Targets path (Compact, never overflows header)
+                Text(headerSubtitle)
                     .font(.system(size: 11))
                     .foregroundColor(Color.white.opacity(0.5))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             

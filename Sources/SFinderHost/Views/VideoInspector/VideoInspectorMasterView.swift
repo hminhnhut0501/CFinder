@@ -117,18 +117,19 @@ public struct VideoInspectorMasterView: View {
                     .foregroundColor(CFinderTheme.FeatureColor.videoInspector)
             }
             
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.reports.count >= 2 ? "So sánh & Chấm điểm Video" : "Chi tiết thông số Video")
                     .font(.system(size: 15, weight: .bold))
                     .foregroundColor(.white)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                 
                 Text(urls.count > 1 ? "\(urls.count) video được phân tích đối chiếu" : urls.first?.lastPathComponent ?? "")
                     .font(.system(size: 11))
                     .foregroundColor(Color.white.opacity(0.5))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             

@@ -190,13 +190,14 @@ public struct BatchRenameView: View {
                         )
                         .foregroundColor(.white)
                 }
+                .fixedSize(horizontal: true, vertical: false)
                 
                 Text(currentURLs.isEmpty ? "Đổi tên nhanh và an toàn trên macOS Finder" : "\(currentURLs.count) tệp được nạp")
                     .font(.system(size: 11))
                     .foregroundColor(Color.white.opacity(0.5))
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
-            .fixedSize(horizontal: true, vertical: false)
             
             Spacer()
             
