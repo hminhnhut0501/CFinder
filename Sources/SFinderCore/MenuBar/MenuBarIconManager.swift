@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import ApplicationServices
 
-// MARK: - Native macOS 27 MenuBar Visibility Engine
+// MARK: - Native macOS MenuBar Visibility Engine (macOS 14+ / macOS 27+)
 private final class NativeMenuBarEngine {
     static let shared = NativeMenuBarEngine()
     
@@ -10,6 +10,9 @@ private final class NativeMenuBarEngine {
     private var configClass: NSObject.Type?
     private var assertionClass: NSObject.Type?
     private var currentAssertion: AnyObject?
+    
+    // Cache vị trí X của các app khi thanh menu đang ở trạng thái mở rộng (Expanded)
+    private var cachedAppMinX: [String: CGFloat] = [:]
     
     init() {
         if let _ = dlopen("/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore", RTLD_NOW | RTLD_LOCAL) {
@@ -23,16 +26,58 @@ private final class NativeMenuBarEngine {
         return isLoaded
     }
     
-    func hideIconsLeftOf(arrowX: CGFloat) {
-        guard isAvailable, let configClass = configClass, let assertionClass = assertionClass else { return }
+    /// Lưu vị trí tọa độ của tất cả các app trên Menu Bar khi thanh menu đang mở hoàn toàn
+    func snapshotExpandedPositions() {
+        guard isAvailable else { return }
         
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let apps = NSWorkspace.shared.runningApplications
             .filter { $0.processIdentifier != ownPID && $0.bundleURL?.pathExtension == "app" }
-            .map { (pid: $0.processIdentifier, bundleIdentifier: $0.bundleIdentifier) }
+        
+        var newPositions: [String: CGFloat] = [:]
+        for app in apps {
+            guard let bundle = app.bundleIdentifier else { continue }
+            let element = AXUIElementCreateApplication(app.processIdentifier)
+            AXUIElementSetMessagingTimeout(element, 0.08)
+            var barValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, "AXExtrasMenuBar" as CFString, &barValue) == .success,
+                  let bar = barValue else { continue }
+            var childrenValue: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+                  let children = childrenValue as? [AXUIElement], !children.isEmpty else { continue }
+            
+            var minAppX: CGFloat = .greatestFiniteMagnitude
+            for child in children {
+                var posVal: CFTypeRef?
+                if AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &posVal) == .success {
+                    var pos = CGPoint.zero
+                    AXValueGetValue(posVal as! AXValue, .cgPoint, &pos)
+                    if pos.x > 0 {
+                        minAppX = min(minAppX, pos.x)
+                    }
+                }
+            }
+            if minAppX < .greatestFiniteMagnitude {
+                newPositions[bundle] = minAppX
+            }
+        }
+        
+        if !newPositions.isEmpty {
+            self.cachedAppMinX = newPositions
+        }
+    }
+    
+    /// Ẩn toàn bộ icon nằm bên TRÁI nút mũi tên (arrowX) bằng cơ chế Native Apple Visibility
+    func hideIconsLeftOf(arrowX: CGFloat) {
+        guard isAvailable, let configClass = configClass, let assertionClass = assertionClass else { return }
+        
+        // Nếu bộ nhớ tạm chưa có dữ liệu, quét nhanh ngay lúc này
+        if cachedAppMinX.isEmpty {
+            snapshotExpandedPositions()
+        }
         
         var allowedBundles = Set<String>()
-        // System and CFinder bundles always allowed
+        // Luôn luôn cho phép hệ thống macOS và CFinder
         allowedBundles.insert("com.sfinder.app")
         allowedBundles.insert("com.sfinder.host")
         allowedBundles.insert("com.apple.finder")
@@ -40,26 +85,10 @@ private final class NativeMenuBarEngine {
             allowedBundles.insert(ownBundle)
         }
         
-        for app in apps {
-            guard let bundle = app.bundleIdentifier else { continue }
-            let element = AXUIElementCreateApplication(app.pid)
-            AXUIElementSetMessagingTimeout(element, 0.05)
-            var barValue: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, "AXExtrasMenuBar" as CFString, &barValue) == .success,
-                  let bar = barValue else { continue }
-            var childrenValue: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &childrenValue) == .success,
-                  let children = childrenValue as? [AXUIElement] else { continue }
-            for child in children {
-                var posVal: CFTypeRef?
-                if AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &posVal) == .success {
-                    var pos = CGPoint.zero
-                    AXValueGetValue(posVal as! AXValue, .cgPoint, &pos)
-                    // Icons positioned to the RIGHT of the arrow stay visible
-                    if pos.x > arrowX {
-                        allowedBundles.insert(bundle)
-                    }
-                }
+        // Các app có tọa độ X nằm bên PHẢI (hoặc bằng) nút mũi tên sẽ tiếp tục được hiển thị
+        for (bundle, posX) in cachedAppMinX {
+            if posX >= arrowX {
+                allowedBundles.insert(bundle)
             }
         }
         
@@ -85,6 +114,7 @@ private final class NativeMenuBarEngine {
         self.currentAssertion = assertion
     }
     
+    /// Hủy bỏ ẩn biểu tượng, khôi phục thanh Menu Bar trở lại đầy đủ ngay lập tức
     func invalidate() {
         if let a = currentAssertion {
             _ = a.perform(Selector(("invalidate")))
@@ -93,8 +123,40 @@ private final class NativeMenuBarEngine {
     }
 }
 
+/// View bắt sự kiện Hover và Click trên nút điều khiển Menu Bar (0% CPU, mượt mà chuẩn macOS)
+final class MenuBarHoverTrackingView: NSView {
+    weak var manager: MenuBarIconManager?
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let ta = trackingArea { removeTrackingArea(ta) }
+        let ta = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(ta)
+        trackingArea = ta
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        manager?.handleHoverEntered()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        manager?.handleHoverExited()
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Trả về nil để sự kiện click chuột đi thẳng vào NSStatusBarButton bên dưới
+        return nil
+    }
+}
+
 /// Quản lý ẩn/hiện và sắp xếp biểu tượng trên thanh Menu Bar (MenuBar Icons Manager)
-/// Cơ chế Native Visibility cho macOS 27+ kết hợp Spacer-Collapse cho macOS cũ
+/// Tối ưu 100% cho macOS 27: Triệt tiêu hoàn toàn khoảng trống rỗng, không xung đột overflow, không giật lag
 @MainActor
 public final class MenuBarIconManager: NSObject, ObservableObject {
     public static let shared = MenuBarIconManager()
@@ -157,8 +219,10 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
             if isOrganizingMode {
                 stopAutoHideTimer()
                 expand()
-                onShowToast?("hand.draw.fill", "Chế độ sắp xếp Menu Bar", "Giữ phím ⌘ (Command) và kéo icon qua lại vạch |")
+                onShowToast?("hand.draw.fill", "Chế độ sắp xếp Menu Bar", "Giữ phím ⌘ (Command) và kéo icon qua lại nút mũi tên ◀")
             } else {
+                // Thoát chế độ sắp xếp: Lưu vị trí mới của các app và tiếp tục hẹn giờ tự ẩn
+                NativeMenuBarEngine.shared.snapshotExpandedPositions()
                 if autoHideEnabled {
                     startAutoHideTimerIfNeeded()
                 }
@@ -175,15 +239,9 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     private var separateItem: NSStatusItem?
     private var autoHideTimer: Timer?
     
-    // Global and local hover monitors
-    private var globalHoverMonitor: Any?
-    private var localHoverMonitor: Any?
+    // Hover tracking
+    private var hoverTrackingView: MenuBarHoverTrackingView?
     private var hoverDwellTimer: Timer?
-    
-    private var dynamicCollapsedLength: CGFloat {
-        let maxScreenWidth = NSScreen.screens.map { $0.frame.width }.max() ?? 1920
-        return max(800, min(maxScreenWidth * 2, 10_000))
-    }
     
     private override init() {
         let defaults = UserDefaults.standard
@@ -192,14 +250,7 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
         self.autoHideEnabled = defaults.object(forKey: "sfinder_menubar_autohide_enabled") as? Bool ?? true
         self.autoHideDelay = defaults.object(forKey: "sfinder_menubar_autohide_delay") as? Double ?? 5.0
         self.expandOnHover = defaults.object(forKey: "sfinder_menubar_expand_on_hover") as? Bool ?? true
-        // Default separator line to false to keep menubar clean
-        if defaults.object(forKey: "sfinder_menubar_show_separator_v2") == nil {
-            defaults.set(false, forKey: "sfinder_menubar_show_separator")
-            defaults.set(true, forKey: "sfinder_menubar_show_separator_v2")
-            self.showSeparator = false
-        } else {
-            self.showSeparator = defaults.object(forKey: "sfinder_menubar_show_separator") as? Bool ?? false
-        }
+        self.showSeparator = defaults.object(forKey: "sfinder_menubar_show_separator") as? Bool ?? false
         super.init()
         
         NotificationCenter.default.addObserver(
@@ -212,8 +263,6 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     
     deinit {
         NotificationCenter.default.removeObserver(self)
-        if let gm = globalHoverMonitor { NSEvent.removeMonitor(gm) }
-        if let lm = localHoverMonitor { NSEvent.removeMonitor(lm) }
         hoverDwellTimer?.invalidate()
         autoHideTimer?.invalidate()
         NativeMenuBarEngine.shared.invalidate()
@@ -223,13 +272,31 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     
     public func setup() {
         guard isEnabled else { return }
+        
+        // Dọn dẹp bất kỳ separateItem nào từ các phiên bản cũ còn sót lại trong status bar
+        if let si = separateItem {
+            NSStatusBar.system.removeStatusItem(si)
+            separateItem = nil
+        }
+        
         updateStatusItems()
         setupHoverMonitor()
+        
+        // Quét lấy vị trí mở rộng ban đầu sau khi thanh menu ổn định
+        if !isCollapsed {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NativeMenuBarEngine.shared.snapshotExpandedPositions()
+            }
+        }
     }
     
     @objc private func handleScreenParametersChanged() {
         if isCollapsed {
             applyCollapseState()
+        } else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                NativeMenuBarEngine.shared.snapshotExpandedPositions()
+            }
         }
     }
     
@@ -245,9 +312,6 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     }
     
     private func createStatusItemsIfNeeded() {
-        // Thứ tự tạo item trong macOS:
-        // Item 1 (collapseItem): Nằm bên PHẢI (giáp khu vực icon luôn hiện)
-        // Item 2 (separateItem): Nằm bên TRÁI collapseItem (ngăn cách khu vực icon ẩn)
         if collapseItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             item.autosaveName = "CFinder_MenuBar_Toggle"
@@ -255,20 +319,31 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
                 btn.target = self
                 btn.action = #selector(handleCollapseClick)
                 btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
+                
+                let trackingView = MenuBarHoverTrackingView(frame: btn.bounds)
+                trackingView.autoresizingMask = [.width, .height]
+                trackingView.manager = self
+                btn.addSubview(trackingView)
+                self.hoverTrackingView = trackingView
             }
             self.collapseItem = item
         }
         
-        if separateItem == nil {
-            let item = NSStatusBar.system.statusItem(withLength: showSeparator ? Self.normalSeparatorLength : 0.0)
-            item.autosaveName = "CFinder_MenuBar_Separator"
-            if let btn = item.button {
-                btn.target = self
-                btn.action = #selector(handleSeparatorClick)
-                btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        // Trên macOS 27: NativeMenuBarEngine sử dụng nút mũi tên làm ranh giới duy nhất.
+        // Loại bỏ hoàn toàn separateItem để không chiếm khoảng trống hoặc gây lỗi overflow >>.
+        if NativeMenuBarEngine.shared.isAvailable {
+            if let si = separateItem {
+                NSStatusBar.system.removeStatusItem(si)
+                separateItem = nil
             }
-            self.separateItem = item
-            updateSeparatorVisuals()
+        } else {
+            // Fallback chỉ dành cho macOS cũ không có Native Engine
+            if showSeparator && separateItem == nil {
+                let item = NSStatusBar.system.statusItem(withLength: Self.normalSeparatorLength)
+                item.autosaveName = "CFinder_MenuBar_Separator"
+                self.separateItem = item
+                updateSeparatorVisuals()
+            }
         }
     }
     
@@ -276,6 +351,9 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
         stopAutoHideTimer()
         removeHoverMonitor()
         NativeMenuBarEngine.shared.invalidate()
+        
+        hoverTrackingView?.removeFromSuperview()
+        hoverTrackingView = nil
         
         if let ci = collapseItem {
             NSStatusBar.system.removeStatusItem(ci)
@@ -289,21 +367,13 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     
     // MARK: - Click Handlers
     
-    @objc private func handleCollapseClick() {
+    @objc func handleCollapseClick() {
         guard isEnabled else { return }
         if let event = NSApp.currentEvent, event.type == .rightMouseUp {
             onOpenSettings?()
             return
         }
         toggle()
-    }
-    
-    @objc private func handleSeparatorClick() {
-        guard isEnabled else { return }
-        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
-            onOpenSettings?()
-            return
-        }
     }
     
     // MARK: - Collapse & Expand Actions
@@ -332,28 +402,50 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     }
     
     private func applyCollapseState() {
-        guard isEnabled, let sep = separateItem, let col = collapseItem else { return }
+        guard isEnabled, let col = collapseItem else { return }
         
         let config = NSImage.SymbolConfiguration(pointSize: 11.5, weight: .semibold)
         
         if isCollapsed {
+            // Khi thu gọn: Đảm bảo không có separator rác nào làm rách thanh menu
+            if let sep = separateItem {
+                NSStatusBar.system.removeStatusItem(sep)
+                separateItem = nil
+            }
+            
+            // Icon chỉ sang TRÁI (◀): Click để mở rộng hiển thị các icon đang ẩn bên trái
             col.button?.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: "Hiện biểu tượng")?.withSymbolConfiguration(config)
             col.button?.toolTip = "CFinder: Nhấp để hiển thị các biểu tượng đang ẩn (⌃⌥B)"
             
             if NativeMenuBarEngine.shared.isAvailable {
-                sep.length = 0.0
-                sep.button?.image = nil
-                let arrowX = col.button?.window?.frame.midX ?? 1150.0
+                guard let window = col.button?.window, window.frame.minX > 100 else {
+                    // Nếu status item chưa được WindowServer gắn frame chính xác, thử lại sau 0.15s
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                        self?.applyCollapseState()
+                    }
+                    return
+                }
+                
+                // Lấy tọa độ minX của nút Toggle. Tất cả icon có tọa độ X < arrowX sẽ được ẩn sạch sẽ
+                let arrowX = window.frame.minX
                 NativeMenuBarEngine.shared.hideIconsLeftOf(arrowX: arrowX)
-            } else {
-                sep.length = dynamicCollapsedLength
+            } else if let sep = separateItem {
+                sep.length = 1000.0
             }
         } else {
             if NativeMenuBarEngine.shared.isAvailable {
                 NativeMenuBarEngine.shared.invalidate()
+                
+                // Đợi 0.35s cho macOS WindowServer hiển thị lại các icon đầy đủ, sau đó snapshot tọa độ chính xác
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                    guard let self = self, !self.isCollapsed else { return }
+                    NativeMenuBarEngine.shared.snapshotExpandedPositions()
+                }
+            } else if let sep = separateItem {
+                sep.length = showSeparator ? Self.normalSeparatorLength : 0.0
             }
             
-            sep.length = showSeparator ? Self.normalSeparatorLength : 0.0
+            // Icon chỉ sang PHẢI (▶): Click để thu gọn giấu bớt biểu tượng
             col.button?.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Giấu bớt biểu tượng")?.withSymbolConfiguration(config)
             col.button?.toolTip = "CFinder: Nhấp để thu gọn giấu biểu tượng (⌃⌥B)"
         }
@@ -374,17 +466,11 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
     }
     
     private func updateSeparatorVisuals() {
-        guard let sep = separateItem else { return }
-        if showSeparator {
-            if !isCollapsed {
-                sep.length = Self.normalSeparatorLength
-                sep.button?.image = makeSeparatorImage()
-                sep.button?.toolTip = "CFinder: Giữ phím ⌘ và kéo biểu tượng sang bên trái vạch này để ẩn"
-            } else {
-                sep.length = 0.0
-                sep.button?.image = nil
-                sep.button?.toolTip = nil
-            }
+        guard !NativeMenuBarEngine.shared.isAvailable, let sep = separateItem else { return }
+        if showSeparator && !isCollapsed {
+            sep.length = Self.normalSeparatorLength
+            sep.button?.image = makeSeparatorImage()
+            sep.button?.toolTip = "CFinder: Giữ phím ⌘ và kéo biểu tượng sang bên trái vạch này để ẩn"
         } else {
             sep.length = 0.0
             sep.button?.image = nil
@@ -419,6 +505,7 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
         if let screen = primaryScreen {
             let inMenuBar = (mouseLoc.y >= screen.visibleFrame.maxY && mouseLoc.y <= screen.frame.maxY)
             if inMenuBar {
+                // Chuột vẫn đang ở trên thanh Menu Bar, gia hạn thêm 2.5s
                 autoHideTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
                     Task { @MainActor [weak self] in
                         self?.handleAutoHideTrigger()
@@ -431,83 +518,38 @@ public final class MenuBarIconManager: NSObject, ObservableObject {
         collapse()
     }
     
-    // MARK: - Hover Detection (Global Event Monitor)
+    // MARK: - Hover Detection (NSTrackingArea)
     
     private func setupHoverMonitor() {
-        removeHoverMonitor()
-        guard expandOnHover && isEnabled else { return }
-        
-        globalHoverMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handleMouseMovement(event: event)
-            }
-        }
-        
-        localHoverMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-            Task { @MainActor [weak self] in
-                self?.handleMouseMovement(event: event)
-            }
-            return event
-        }
+        // NSTrackingArea được quản lý trực tiếp bên trong MenuBarHoverTrackingView
     }
     
     private func removeHoverMonitor() {
-        if let gm = globalHoverMonitor {
-            NSEvent.removeMonitor(gm)
-            globalHoverMonitor = nil
-        }
-        if let lm = localHoverMonitor {
-            NSEvent.removeMonitor(lm)
-            localHoverMonitor = nil
-        }
         hoverDwellTimer?.invalidate()
         hoverDwellTimer = nil
     }
     
-    private func handleMouseMovement(event: NSEvent) {
-        guard expandOnHover, isEnabled else { return }
-        let mouseLoc = NSEvent.mouseLocation
-        
-        guard let button = collapseItem?.button,
-              let window = button.window else { return }
-        
-        let buttonScreenRect = window.frame
-        let hitTarget = buttonScreenRect.insetBy(dx: -8, dy: -4)
-        
-        if hitTarget.contains(mouseLoc) {
-            if isCollapsed {
-                if hoverDwellTimer == nil {
-                    hoverDwellTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
-                        Task { @MainActor [weak self] in
-                            guard let self = self, self.isCollapsed else { return }
-                            self.hoverDwellTimer = nil
-                            let currentPos = NSEvent.mouseLocation
-                            if hitTarget.contains(currentPos) {
-                                self.expand()
-                            }
-                        }
-                    }
+    func handleHoverEntered() {
+        guard expandOnHover && isEnabled else { return }
+        if isCollapsed {
+            hoverDwellTimer?.invalidate()
+            hoverDwellTimer = Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self = self, self.isCollapsed else { return }
+                    self.hoverDwellTimer = nil
+                    self.expand()
                 }
-            } else {
-                stopAutoHideTimer()
             }
         } else {
-            hoverDwellTimer?.invalidate()
-            hoverDwellTimer = nil
-            
-            if !isCollapsed && autoHideEnabled && !isOrganizingMode {
-                let primaryScreen = NSScreen.screens.first { $0.frame.contains(mouseLoc) } ?? NSScreen.main
-                if let screen = primaryScreen {
-                    let inMenuBar = (mouseLoc.y >= screen.visibleFrame.maxY && mouseLoc.y <= screen.frame.maxY)
-                    if inMenuBar {
-                        stopAutoHideTimer()
-                    } else {
-                        if autoHideTimer == nil {
-                            startAutoHideTimerIfNeeded()
-                        }
-                    }
-                }
-            }
+            stopAutoHideTimer()
+        }
+    }
+    
+    func handleHoverExited() {
+        hoverDwellTimer?.invalidate()
+        hoverDwellTimer = nil
+        if !isCollapsed && autoHideEnabled && !isOrganizingMode {
+            startAutoHideTimerIfNeeded()
         }
     }
 }

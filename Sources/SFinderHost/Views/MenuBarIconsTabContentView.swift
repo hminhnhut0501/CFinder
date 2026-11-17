@@ -245,7 +245,7 @@ public struct MenuBarIconsTabContentView: View {
             // Visual Explanatory Sub-labels
             HStack {
                 Spacer()
-                Text("← Vùng Ẩn (Bên trái |)")
+                Text("← Vùng Ẩn (Bên trái nút ◀)")
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundColor(Color(hex: "38BDF8").opacity(0.7))
                 
@@ -253,7 +253,7 @@ public struct MenuBarIconsTabContentView: View {
                     .foregroundColor(.white.opacity(0.2))
                     .padding(.horizontal, 4)
                 
-                Text("Vùng Luôn Hiện (Bên phải ◀) →")
+                Text("Vùng Luôn Hiện (Bên phải nút ◀) →")
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundColor(.white.opacity(0.45))
             }
@@ -266,8 +266,8 @@ public struct MenuBarIconsTabContentView: View {
             manager.toggle()
         }) {
             HStack(spacing: 7) {
-                Image(systemName: manager.isCollapsed ? "chevron.right.2" : "chevron.left.2")
-                Text(manager.isCollapsed ? "Mở rộng hiện tất cả biểu tượng (Test)" : "Thu gọn giấu biểu tượng ngay (Test)")
+                Image(systemName: manager.isCollapsed ? "eye" : "eye.slash")
+                Text(manager.isCollapsed ? "Mở rộng hiện tất cả biểu tượng (Test)" : "Thu gọn giấu bớt biểu tượng (Test)")
             }
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(.white)
