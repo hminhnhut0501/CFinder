@@ -61,6 +61,17 @@ public enum NumberingFormat: String, CaseIterable, Codable, Sendable {
     case fourDigits = "0001, 0002..."
     case parentheses = "(1), (2), (3)..."
     case brackets = "[1], [2], [3]..."
+    
+    public var shortLabel: String {
+        switch self {
+        case .plain: return "1"
+        case .twoDigits: return "01"
+        case .threeDigits: return "001"
+        case .fourDigits: return "0001"
+        case .parentheses: return "(1)"
+        case .brackets: return "[1]"
+        }
+    }
 }
 
 public enum RenameTokenType: String, Codable, Sendable {

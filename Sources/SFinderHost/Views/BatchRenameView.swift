@@ -638,16 +638,64 @@ public struct FlowLayout: Layout {
     }
 }
 
+struct TokenDropDelegate: DropDelegate {
+    let targetToken: RenameToken
+    @Binding var tokens: [RenameToken]
+    @Binding var draggedToken: RenameToken?
+    let onDropComplete: () -> Void
+    
+    func dropEntered(info: DropInfo) {
+        guard let dragged = draggedToken,
+              dragged.id != targetToken.id,
+              let fromIndex = tokens.firstIndex(where: { $0.id == dragged.id }),
+              let toIndex = tokens.firstIndex(where: { $0.id == targetToken.id })
+        else { return }
+        
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+            let item = tokens.remove(at: fromIndex)
+            tokens.insert(item, at: toIndex)
+        }
+        onDropComplete()
+    }
+    
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        return DropProposal(operation: .move)
+    }
+    
+    func performDrop(info: DropInfo) -> Bool {
+        draggedToken = nil
+        onDropComplete()
+        return true
+    }
+}
+
 struct RecipeTokenFlowView: View {
     @Binding var rule: RenameRule
     @Binding var showFindReplaceBlock: Bool
     let onTokenChanged: () -> Void
     
+    @State private var draggedToken: RenameToken?
+    
     var body: some View {
-        FlowLayout(spacing: 7, lineSpacing: 7) {
+        FlowLayout(spacing: 8, lineSpacing: 8) {
             ForEach($rule.tokens) { $token in
                 let index = rule.tokens.firstIndex(where: { $0.id == token.id }) ?? 0
                 tokenChip(token: $token, index: index)
+                    .opacity(draggedToken?.id == token.id ? 0.35 : 1.0)
+                    .scaleEffect(draggedToken?.id == token.id ? 0.96 : 1.0)
+                    .onDrag {
+                        self.draggedToken = token
+                        return NSItemProvider(object: token.id.uuidString as NSString)
+                    }
+                    .onDrop(
+                        of: [.text],
+                        delegate: TokenDropDelegate(
+                            targetToken: token,
+                            tokens: $rule.tokens,
+                            draggedToken: $draggedToken,
+                            onDropComplete: { onTokenChanged() }
+                        )
+                    )
             }
             
             if showFindReplaceBlock || !rule.findText.isEmpty {
@@ -675,120 +723,51 @@ struct RecipeTokenFlowView: View {
     
     @ViewBuilder
     private func tokenChip(token: Binding<RenameToken>, index: Int) -> some View {
-        let canMoveLeft = index > 0
-        let canMoveRight = index < rule.tokens.count - 1
-        
         switch token.wrappedValue.type {
         case .originalName:
-            TokenOriginalNameChipView(
-                token: token,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: { moveToken(from: index, to: index - 1) },
-                onMoveRight: { moveToken(from: index, to: index + 1) }
-            )
+            TokenOriginalNameChipView(token: token)
         case .date:
             TokenDateChipView(
                 token: token,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: { moveToken(from: index, to: index - 1) },
-                onMoveRight: { moveToken(from: index, to: index + 1) },
                 onDelete: { deleteToken(at: index) }
             )
         case .text:
             TokenTextChipView(
                 token: token,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: { moveToken(from: index, to: index - 1) },
-                onMoveRight: { moveToken(from: index, to: index + 1) },
                 onDelete: { deleteToken(at: index) }
             )
         case .number:
             TokenNumberChipView(
                 token: token,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: { moveToken(from: index, to: index - 1) },
-                onMoveRight: { moveToken(from: index, to: index + 1) },
                 onDelete: { deleteToken(at: index) }
             )
         case .trim:
             TokenTrimChipView(
                 token: token,
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: { moveToken(from: index, to: index - 1) },
-                onMoveRight: { moveToken(from: index, to: index + 1) },
                 onDelete: { deleteToken(at: index) }
             )
         }
     }
     
-    private func moveToken(from: Int, to: Int) {
-        guard from >= 0 && from < rule.tokens.count, to >= 0 && to < rule.tokens.count, from != to else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
-            let item = rule.tokens.remove(at: from)
-            rule.tokens.insert(item, at: to)
-        }
-        onTokenChanged()
-    }
-    
     private func deleteToken(at index: Int) {
         guard index >= 0 && index < rule.tokens.count else { return }
-        withAnimation(.easeInOut(duration: 0.18)) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
             _ = rule.tokens.remove(at: index)
         }
         onTokenChanged()
     }
 }
 
-struct ReorderArrowsView: View {
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 2) {
-            if canMoveLeft {
-                Button(action: onMoveLeft) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundColor(.white.opacity(0.65))
-                        .frame(width: 14, height: 16)
-                        .background(Color.white.opacity(0.08))
-                        .cornerRadius(3)
-                }
-                .buttonStyle(.plain)
-                .help("Di chuyển khối sang trái (đổi thứ tự)")
-            }
-            if canMoveRight {
-                Button(action: onMoveRight) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .foregroundColor(.white.opacity(0.65))
-                        .frame(width: 14, height: 16)
-                        .background(Color.white.opacity(0.08))
-                        .cornerRadius(3)
-                }
-                .buttonStyle(.plain)
-                .help("Di chuyển khối sang phải (đổi thứ tự)")
-            }
-        }
-    }
-}
-
 struct TokenOriginalNameChipView: View {
     @Binding var token: RenameToken
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
     
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 5) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundColor(.white.opacity(0.35))
+                .padding(.leading, 7)
+            
             Menu {
                 Button(action: {
                     token.clearOriginal = false
@@ -811,16 +790,13 @@ struct TokenOriginalNameChipView: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: token.clearOriginal ? "trash.fill" : "doc.text.fill")
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.system(size: 9.5, weight: .bold))
                     Text(token.clearOriginal ? "Xóa tên cũ" : "Giữ tên gốc")
                         .font(.system(size: 11, weight: .bold))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7, weight: .bold))
                         .opacity(0.6)
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 4)
-                .padding(.vertical, 4.5)
                 .foregroundColor(token.clearOriginal ? Color(hex: "F43F5E") : .white)
             }
             .menuStyle(.borderlessButton)
@@ -830,38 +806,29 @@ struct TokenOriginalNameChipView: View {
                 HStack(spacing: 2) {
                     TextField("Tên mới...", text: $token.customBaseName)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .frame(width: 80)
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 70)
                     if !token.customBaseName.isEmpty {
                         Button(action: { token.customBaseName = "" }) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 8.5))
+                                .font(.system(size: 8))
                                 .foregroundColor(.white.opacity(0.45))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2.5)
-                .background(Color.white.opacity(0.06))
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Color.white.opacity(0.08))
                 .cornerRadius(4)
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
             }
-            
-            if canMoveLeft || canMoveRight {
-                ReorderArrowsView(
-                    canMoveLeft: canMoveLeft,
-                    canMoveRight: canMoveRight,
-                    onMoveLeft: onMoveLeft,
-                    onMoveRight: onMoveRight
-                )
-                .padding(.trailing, 4)
-            }
         }
-        .padding(.vertical, 2)
+        .padding(.trailing, 8)
+        .frame(height: 28)
         .background(
             token.clearOriginal
-                ? Color(hex: "F43F5E").opacity(0.22)
+                ? Color(hex: "F43F5E").opacity(0.2)
                 : Color.white.opacity(0.08)
         )
         .clipShape(Capsule())
@@ -869,49 +836,54 @@ struct TokenOriginalNameChipView: View {
             Capsule()
                 .stroke(
                     token.clearOriginal ? Color(hex: "F43F5E").opacity(0.4) : Color.white.opacity(0.18),
-                    lineWidth: 0.9
+                    lineWidth: 1
                 )
         )
+        .help("Kéo thả để di chuyển vị trí tên gốc trong công thức đổi tên")
     }
 }
 
 struct TokenTextChipView: View {
     @Binding var token: RenameToken
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 3.5) {
-            Image(systemName: "character.cursor.ibeam")
-                .font(.system(size: 9.5, weight: .bold))
+        HStack(spacing: 5) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundColor(Color(hex: "06B6D4").opacity(0.45))
+                .padding(.leading, 7)
+            
+            Image(systemName: "textformat")
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundColor(Color(hex: "06B6D4"))
-                .padding(.leading, 8)
             
-            TextField("Nhập chữ...", text: $token.textValue)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .frame(minWidth: 70, maxWidth: 130)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2.5)
-                .background(Color.white.opacity(0.06))
-                .cornerRadius(4)
-                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
-            
-            ReorderArrowsView(
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: onMoveLeft,
-                onMoveRight: onMoveRight
-            )
+            HStack(spacing: 2) {
+                TextField("Nhập chữ...", text: $token.textValue)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .frame(minWidth: 50, maxWidth: 110)
+                
+                if !token.textValue.isEmpty {
+                    Button(action: { token.textValue = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 8))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Color.white.opacity(0.07))
+            .cornerRadius(4)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
             
             Button(action: onDelete) {
                 Image(systemName: "xmark")
                     .font(.system(size: 7.5, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 15, height: 15)
                     .background(Color.white.opacity(0.08))
                     .clipShape(Circle())
             }
@@ -919,23 +891,25 @@ struct TokenTextChipView: View {
             .padding(.trailing, 6)
             .help("Xóa khối chữ này")
         }
-        .padding(.vertical, 3)
+        .frame(height: 28)
         .background(Color(hex: "06B6D4").opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "06B6D4").opacity(0.32), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color(hex: "06B6D4").opacity(0.32), lineWidth: 1))
+        .help("Khối chữ - Kéo thả để di chuyển vị trí")
     }
 }
 
 struct TokenDateChipView: View {
     @Binding var token: RenameToken
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 3.5) {
+        HStack(spacing: 5) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundColor(CFinderTheme.FeatureColor.rename.opacity(0.45))
+                .padding(.leading, 7)
+            
             Menu {
                 ForEach(DatePrefixFormat.allCases, id: \.self) { fmt in
                     Button(action: { token.dateFormat = fmt }) {
@@ -946,7 +920,7 @@ struct TokenDateChipView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 3.5) {
+                HStack(spacing: 3) {
                     Image(systemName: "calendar")
                         .font(.system(size: 9.5, weight: .semibold))
                         .foregroundColor(CFinderTheme.FeatureColor.rename)
@@ -957,27 +931,17 @@ struct TokenDateChipView: View {
                     
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7, weight: .bold))
-                        .opacity(0.5)
+                        .opacity(0.6)
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 3)
-                .padding(.vertical, 4)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             
-            ReorderArrowsView(
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: onMoveLeft,
-                onMoveRight: onMoveRight
-            )
-            
             Button(action: onDelete) {
                 Image(systemName: "xmark")
                     .font(.system(size: 7.5, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 15, height: 15)
                     .background(Color.white.opacity(0.08))
                     .clipShape(Circle())
             }
@@ -985,27 +949,24 @@ struct TokenDateChipView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Ngày")
         }
-        .padding(.vertical, 3)
+        .frame(height: 28)
         .background(CFinderTheme.FeatureColor.rename.opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(CFinderTheme.FeatureColor.rename.opacity(0.32), lineWidth: 0.9))
+        .overlay(Capsule().stroke(CFinderTheme.FeatureColor.rename.opacity(0.32), lineWidth: 1))
+        .help("Khối Ngày - Kéo thả để di chuyển vị trí")
     }
 }
 
 struct TokenNumberChipView: View {
     @Binding var token: RenameToken
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 3.5) {
-            Image(systemName: "number")
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundColor(Color(hex: "8B5CF6"))
-                .padding(.leading, 8)
+        HStack(spacing: 5) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundColor(Color(hex: "8B5CF6").opacity(0.45))
+                .padding(.leading, 7)
             
             Menu {
                 ForEach(NumberingFormat.allCases, id: \.self) { fmt in
@@ -1017,8 +978,10 @@ struct TokenNumberChipView: View {
                     }
                 }
             } label: {
-                HStack(spacing: 2.5) {
-                    Text(token.numberFormat.rawValue)
+                HStack(spacing: 3) {
+                    Image(systemName: "number")
+                        .font(.system(size: 9.5, weight: .bold))
+                    Text(token.numberFormat.shortLabel)
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7, weight: .bold))
@@ -1029,26 +992,18 @@ struct TokenNumberChipView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             
-            HStack(spacing: 1.5) {
+            HStack(spacing: 2) {
                 Text("từ")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9.5))
                     .foregroundColor(.secondary)
                 NumberInputField(value: $token.startNumber, range: 0...999999)
-                    .frame(width: 42)
             }
-            
-            ReorderArrowsView(
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: onMoveLeft,
-                onMoveRight: onMoveRight
-            )
             
             Button(action: onDelete) {
                 Image(systemName: "xmark")
                     .font(.system(size: 7.5, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 15, height: 15)
                     .background(Color.white.opacity(0.08))
                     .clipShape(Circle())
             }
@@ -1056,56 +1011,48 @@ struct TokenNumberChipView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Đánh số")
         }
-        .padding(.vertical, 3)
+        .frame(height: 28)
         .background(Color(hex: "8B5CF6").opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "8B5CF6").opacity(0.32), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color(hex: "8B5CF6").opacity(0.32), lineWidth: 1))
+        .help("Khối Đánh số - Kéo thả để di chuyển vị trí")
     }
 }
 
 struct TokenTrimChipView: View {
     @Binding var token: RenameToken
-    let canMoveLeft: Bool
-    let canMoveRight: Bool
-    let onMoveLeft: () -> Void
-    let onMoveRight: () -> Void
     let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 3.5) {
+        HStack(spacing: 5) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundColor(Color.orange.opacity(0.45))
+                .padding(.leading, 7)
+            
             Image(systemName: "scissors")
                 .font(.system(size: 9.5, weight: .bold))
                 .foregroundColor(Color.orange)
-                .padding(.leading, 8)
             
             HStack(spacing: 2) {
                 Text("Đầu")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9.5))
                     .foregroundColor(.secondary)
                 NumberInputField(value: $token.deleteFirstN, range: 0...999)
-                    .frame(width: 38)
             }
             
             HStack(spacing: 2) {
                 Text("Đuôi")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9.5))
                     .foregroundColor(.secondary)
                 NumberInputField(value: $token.deleteLastN, range: 0...999)
-                    .frame(width: 38)
             }
-            
-            ReorderArrowsView(
-                canMoveLeft: canMoveLeft,
-                canMoveRight: canMoveRight,
-                onMoveLeft: onMoveLeft,
-                onMoveRight: onMoveRight
-            )
             
             Button(action: onDelete) {
                 Image(systemName: "xmark")
                     .font(.system(size: 7.5, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 15, height: 15)
                     .background(Color.white.opacity(0.08))
                     .clipShape(Circle())
             }
@@ -1113,10 +1060,11 @@ struct TokenTrimChipView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Cắt ký tự")
         }
-        .padding(.vertical, 3)
+        .frame(height: 28)
         .background(Color.orange.opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color.orange.opacity(0.32), lineWidth: 1))
+        .help("Khối Cắt bớt ký tự - Kéo thả để di chuyển vị trí")
     }
 }
 
@@ -1128,61 +1076,61 @@ struct RecipeFindReplaceBlockView: View {
     let onClose: () -> Void
     
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9.5, weight: .semibold))
                 .foregroundColor(Color(hex: "10B981"))
-                .padding(.leading, 8)
+                .padding(.leading, 7)
             
             TextField("Tìm...", text: $findText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
-                .frame(width: 75)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2.5)
+                .frame(width: 60)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
                 .background(Color.white.opacity(0.06))
-                .cornerRadius(5)
+                .cornerRadius(4)
             
             Image(systemName: "arrow.right")
-                .font(.system(size: 8))
+                .font(.system(size: 7.5))
                 .foregroundColor(.secondary)
             
             TextField("Thay...", text: $replaceText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
-                .frame(width: 75)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2.5)
+                .frame(width: 60)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
                 .background(Color.white.opacity(0.06))
-                .cornerRadius(5)
+                .cornerRadius(4)
             
             Button(action: { matchCase.toggle() }) {
                 Text("Aa")
-                    .font(.system(size: 9.5, weight: matchCase ? .bold : .regular))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(matchCase ? Color(hex: "10B981").opacity(0.3) : Color.white.opacity(0.06))
-                    .cornerRadius(4)
+                    .font(.system(size: 9, weight: matchCase ? .bold : .regular))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1.5)
+                    .background(matchCase ? Color(hex: "10B981").opacity(0.35) : Color.white.opacity(0.06))
+                    .cornerRadius(3)
             }
             .buttonStyle(.plain)
             .help("Khớp chữ Hoa/thường")
             
             Button(action: { isRegex.toggle() }) {
                 Text(".*")
-                    .font(.system(size: 9.5, weight: isRegex ? .bold : .regular, design: .monospaced))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(isRegex ? Color(hex: "10B981").opacity(0.3) : Color.white.opacity(0.06))
-                    .cornerRadius(4)
+                    .font(.system(size: 9, weight: isRegex ? .bold : .regular, design: .monospaced))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1.5)
+                    .background(isRegex ? Color(hex: "10B981").opacity(0.35) : Color.white.opacity(0.06))
+                    .cornerRadius(3)
             }
             .buttonStyle(.plain)
             .help("Biểu thức Regex")
             
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundColor(.white.opacity(0.6))
+                    .frame(width: 15, height: 15)
                     .background(Color.white.opacity(0.08))
                     .clipShape(Circle())
             }
@@ -1190,10 +1138,10 @@ struct RecipeFindReplaceBlockView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Tìm & Thay thế")
         }
-        .padding(.vertical, 3.5)
+        .frame(height: 28)
         .background(Color(hex: "10B981").opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "10B981").opacity(0.3), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color(hex: "10B981").opacity(0.32), lineWidth: 1))
     }
 }
 
@@ -1205,16 +1153,16 @@ struct RecipeAddTokenMenu: View {
     var body: some View {
         Menu {
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     rule.tokens.append(RenameToken(type: .text, textValue: ""))
                 }
                 onTokenAdded()
             }) {
-                Label("Thêm Chữ (Text)", systemImage: "character.cursor.ibeam")
+                Label("Thêm Chữ (Text)", systemImage: "textformat")
             }
             
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     rule.tokens.append(RenameToken(type: .date, dateFormat: .yyMMdd_))
                 }
                 onTokenAdded()
@@ -1223,7 +1171,7 @@ struct RecipeAddTokenMenu: View {
             }
             
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     rule.tokens.append(RenameToken(type: .number, numberFormat: .twoDigits, startNumber: 1))
                 }
                 onTokenAdded()
@@ -1232,7 +1180,7 @@ struct RecipeAddTokenMenu: View {
             }
             
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     rule.tokens.append(RenameToken(type: .trim, deleteFirstN: 0, deleteLastN: 0))
                 }
                 onTokenAdded()
@@ -1243,7 +1191,7 @@ struct RecipeAddTokenMenu: View {
             Divider()
             
             Button(action: {
-                withAnimation {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                     showFindReplaceBlock = true
                 }
             }) {
@@ -1256,33 +1204,33 @@ struct RecipeAddTokenMenu: View {
                 Text("Thêm khối")
                     .font(.system(size: 11, weight: .semibold))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7.5, weight: .bold))
+                    .font(.system(size: 7, weight: .bold))
                     .opacity(0.6)
             }
             .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(
-                LinearGradient(
-                    colors: [CFinderTheme.FeatureColor.rename.opacity(0.25), Color(hex: "7C3AED").opacity(0.25)],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .foregroundColor(.white)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(
-                        LinearGradient(
-                            colors: [CFinderTheme.FeatureColor.rename.opacity(0.6), Color(hex: "7C3AED").opacity(0.6)],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 1
-                    )
-            )
         }
         .menuStyle(.borderlessButton)
+        .frame(height: 28)
+        .background(
+            LinearGradient(
+                colors: [CFinderTheme.FeatureColor.rename.opacity(0.25), Color(hex: "7C3AED").opacity(0.25)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .foregroundColor(.white)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(
+                    LinearGradient(
+                        colors: [CFinderTheme.FeatureColor.rename.opacity(0.6), Color(hex: "7C3AED").opacity(0.6)],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    ),
+                    lineWidth: 1
+                )
+        )
         .fixedSize()
         .help("Thêm các khối ghép tên: Chữ, Ngày, Đánh số, Cắt ký tự, Tìm thay thế")
     }
@@ -1689,7 +1637,7 @@ struct RenameFooterBarView: View {
     }
 }
 
-// MARK: - Number Input Field (Direct Edit + Stepper)
+// MARK: - Number Input Field (Direct Edit, Compact & Centered)
 
 struct NumberInputField: View {
     @Binding var value: Int
@@ -1698,53 +1646,46 @@ struct NumberInputField: View {
     @FocusState private var isFocused: Bool
     
     var body: some View {
-        HStack(spacing: 2) {
-            TextField("0", text: $text)
-                .focused($isFocused)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                .multilineTextAlignment(.center)
-                .frame(width: 44)
-                .onSubmit {
+        TextField("0", text: $text)
+            .focused($isFocused)
+            .textFieldStyle(.plain)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .multilineTextAlignment(.center)
+            .frame(width: max(22, CGFloat("\(value)".count) * 8 + 12))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(Color.white.opacity(0.08))
+            .cornerRadius(4)
+            .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.14), lineWidth: 0.6))
+            .onSubmit {
+                commitText()
+            }
+            .onChange(of: isFocused) { _, focused in
+                if !focused {
                     commitText()
                 }
-                .onChange(of: isFocused) { _, focused in
-                    if !focused {
-                        commitText()
+            }
+            .onChange(of: text) { _, newText in
+                let digits = newText.filter { $0.isNumber }
+                if digits != newText {
+                    text = digits
+                }
+                if let num = Int(digits) {
+                    let clamped = min(max(num, range.lowerBound), range.upperBound)
+                    if value != clamped {
+                        value = clamped
                     }
                 }
-                .onChange(of: text) { _, newText in
-                    let digits = newText.filter { $0.isNumber }
-                    if digits != newText {
-                        text = digits
-                    }
-                    if let num = Int(digits) {
-                        let clamped = min(max(num, range.lowerBound), range.upperBound)
-                        if value != clamped {
-                            value = clamped
-                        }
-                    }
+            }
+            .onChange(of: value) { _, newVal in
+                let currentNum = Int(text.filter { $0.isNumber })
+                if currentNum != newVal {
+                    text = "\(newVal)"
                 }
-                .onChange(of: value) { _, newVal in
-                    let currentNum = Int(text.filter { $0.isNumber })
-                    if currentNum != newVal {
-                        text = "\(newVal)"
-                    }
-                }
-                .onAppear {
-                    text = "\(value)"
-                }
-            
-            Stepper("", value: $value, in: range)
-                .labelsHidden()
-                .controlSize(.small)
-        }
-        .padding(.leading, 6)
-        .padding(.trailing, 2)
-        .padding(.vertical, 2.5)
-        .background(Color.white.opacity(0.06))
-        .cornerRadius(6)
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            }
+            .onAppear {
+                text = "\(value)"
+            }
     }
     
     private func commitText() {
