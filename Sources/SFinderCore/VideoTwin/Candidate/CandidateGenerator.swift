@@ -89,6 +89,7 @@ public actor CandidateGenerator {
                 var list: [UInt64] = []
                 if let d = sample.visualFingerprint?.dHash { list.append(d) }
                 if let cd = sample.visualFingerprint?.centerDHash { list.append(cd) }
+                if let zd = sample.visualFingerprint?.zoomDHash { list.append(zd) }
                 return list
             }
             let distanceThreshold = partialOnly ? config.coarseCandidateDistance + 4 : config.coarseCandidateDistance + 2
@@ -103,7 +104,8 @@ public actor CandidateGenerator {
                           other.fingerprints.contains(where: { sample in
                               let dMatch = sample.visualFingerprint?.dHash.map { DHasher.hammingDistance(hash, $0) <= distanceThreshold } ?? false
                               let cMatch = sample.visualFingerprint?.centerDHash.map { DHasher.hammingDistance(hash, $0) <= distanceThreshold } ?? false
-                              return dMatch || cMatch
+                              let zMatch = sample.visualFingerprint?.zoomDHash.map { DHasher.hammingDistance(hash, $0) <= distanceThreshold } ?? false
+                              return dMatch || cMatch || zMatch
                           }) else { continue }
                     pairs.insert(CandidatePair(assetAID: other.id, assetBID: asset.id, reason: partialOnly ? .partialSearch : .coarseFingerprint))
                 }
@@ -134,7 +136,10 @@ public actor CandidateGenerator {
         else { guard ratio >= Double(config.durationRatioMin) || abs(da - db) <= config.durationToleranceSeconds else { return false } }
         if let ma = a.metadata?.videoStream, let mb = b.metadata?.videoStream {
             let maxRatioDiff = partialOnly ? 0.30 : 0.25
-            guard ma.aspectRatio > 0, mb.aspectRatio > 0, abs(ma.aspectRatio - mb.aspectRatio) / max(ma.aspectRatio, mb.aspectRatio) < maxRatioDiff else { return false }
+            let isStandardRatio = ma.aspectRatio > 0 && mb.aspectRatio > 0 && abs(ma.aspectRatio - mb.aspectRatio) / max(ma.aspectRatio, mb.aspectRatio) < maxRatioDiff
+            // Allow crop / re-orientation (e.g. 16:9 vs 9:16 or 16:9 vs 1:1)
+            let isCrossOrientation = (ma.aspectRatio >= 1.2 && mb.aspectRatio <= 0.95) || (mb.aspectRatio >= 1.2 && ma.aspectRatio <= 0.95) || (abs(ma.aspectRatio - 1.0) < 0.15 || abs(mb.aspectRatio - 1.0) < 0.15)
+            guard isStandardRatio || isCrossOrientation else { return false }
         }
         return true
     }

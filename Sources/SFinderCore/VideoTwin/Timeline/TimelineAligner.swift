@@ -8,14 +8,23 @@ public actor TimelineAligner {
 
     func align(framesA: [(timestamp: Double, dHash: UInt64)], framesB: [(timestamp: Double, dHash: UInt64)], durationA: Double, durationB: Double) -> AlignmentResult? {
         align(
-            framesA: framesA.map { ($0.timestamp, $0.dHash, nil) },
-            framesB: framesB.map { ($0.timestamp, $0.dHash, nil) },
+            framesA: framesA.map { ($0.timestamp, $0.dHash, nil, nil) },
+            framesB: framesB.map { ($0.timestamp, $0.dHash, nil, nil) },
             durationA: durationA,
             durationB: durationB
         )
     }
 
     func align(framesA: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?)], framesB: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?)], durationA: Double, durationB: Double) -> AlignmentResult? {
+        align(
+            framesA: framesA.map { ($0.timestamp, $0.dHash, $0.centerDHash, nil) },
+            framesB: framesB.map { ($0.timestamp, $0.dHash, $0.centerDHash, nil) },
+            durationA: durationA,
+            durationB: durationB
+        )
+    }
+
+    func align(framesA: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)], framesB: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)], durationA: Double, durationB: Double) -> AlignmentResult? {
         let minRequired = min(3, config.minimumAlignedSamples)
         guard framesA.count >= minRequired, framesB.count >= minRequired,
               durationA.isFinite, durationB.isFinite, durationA > 0, durationB > 0 else { return nil }
@@ -24,12 +33,20 @@ public actor TimelineAligner {
         let alignThreshold = max(0.76, config.nearDuplicateThreshold - 0.10)
 
         @inline(__always)
-        func frameSim(_ left: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?), _ right: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?)) -> Float {
-            let full = DHasher.similarity(left.dHash, right.dHash)
+        func frameSim(_ left: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?), _ right: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)) -> Float {
+            var best = DHasher.similarity(left.dHash, right.dHash)
             if let ca = left.centerDHash, let cb = right.centerDHash {
-                return max(full, DHasher.similarity(ca, cb))
+                best = max(best, DHasher.similarity(ca, cb))
             }
-            return full
+            if let za = left.zoomDHash {
+                best = max(best, DHasher.similarity(za, right.dHash))
+                if let cb = right.centerDHash { best = max(best, DHasher.similarity(za, cb)) }
+            }
+            if let zb = right.zoomDHash {
+                best = max(best, DHasher.similarity(left.dHash, zb))
+                if let ca = left.centerDHash { best = max(best, DHasher.similarity(ca, zb)) }
+            }
+            return best
         }
 
         var offsets = Set<Double>([0])

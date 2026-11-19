@@ -59,7 +59,7 @@ public struct VideoAnalyzer: Sendable {
                       let d = DHasher.hash(normImg),
                       let p = PHasher.hash(normImg) else { return nil }
 
-                let (centerD, centerP, gridP) = Self.extractRegionalFingerprints(from: normImg)
+                let (centerD, centerP, zoomD, zoomP, gridP) = Self.extractRegionalFingerprints(from: normImg)
 
                 return FrameSample(
                     id: UUID(),
@@ -71,6 +71,8 @@ public struct VideoAnalyzer: Sendable {
                         pHash: p,
                         centerDHash: centerD,
                         centerPHash: centerP,
+                        zoomDHash: zoomD,
+                        zoomPHash: zoomP,
                         gridPHashes: gridP,
                         featurePrint: nil,
                         colorSignature: nil,
@@ -87,13 +89,13 @@ public struct VideoAnalyzer: Sendable {
         return (samples, frames.count)
     }
 
-    /// Computes center safe-region hashes (ignoring outer 18% margins where logos/captions live)
+    /// Computes center safe-region hashes, zoom/crop hashes (~1.4x-1.8x zoom or 9:16 vertical crop),
     /// and 2x2 grid pHashes (robust against partial text/overlay occlusion).
-    private static func extractRegionalFingerprints(from image: CGImage) -> (UInt64?, [UInt8]?, [[UInt8]]?) {
+    private static func extractRegionalFingerprints(from image: CGImage) -> (centerD: UInt64?, centerP: [UInt8]?, zoomD: UInt64?, zoomP: [UInt8]?, gridP: [[UInt8]]?) {
         autoreleasepool {
             let w = CGFloat(image.width)
             let h = CGFloat(image.height)
-            guard w >= 32, h >= 32 else { return (nil, nil, nil) }
+            guard w >= 32, h >= 32 else { return (nil, nil, nil, nil, nil) }
 
             var centerD: UInt64?
             var centerP: [UInt8]?
@@ -101,6 +103,15 @@ public struct VideoAnalyzer: Sendable {
             if centerRect.width >= 16, centerRect.height >= 16, let cropped = image.cropping(to: centerRect) {
                 centerD = DHasher.hash(cropped)
                 centerP = PHasher.hash(cropped)
+            }
+
+            // Deep Zoom & Vertical Crop Region (~1.4x-1.8x zoom, or 9:16 vertical slice from 16:9)
+            var zoomD: UInt64?
+            var zoomP: [UInt8]?
+            let zoomRect = CGRect(x: w * 0.22, y: h * 0.22, width: w * 0.56, height: h * 0.56).integral
+            if zoomRect.width >= 16, zoomRect.height >= 16, let zCropped = image.cropping(to: zoomRect) {
+                zoomD = DHasher.hash(zCropped)
+                zoomP = PHasher.hash(zCropped)
             }
 
             let halfW = floor(w * 0.5)
@@ -118,7 +129,7 @@ public struct VideoAnalyzer: Sendable {
                     grid.append(qHash)
                 }
             }
-            return (centerD, centerP, grid.count == 4 ? grid : nil)
+            return (centerD, centerP, zoomD, zoomP, grid.count == 4 ? grid : nil)
         }
     }
 }

@@ -108,8 +108,10 @@ public final class MatchEngine: Sendable {
             durationB: durationB
         )
 
+        var isCroppedVariant = false
         if let align = alignment {
-            let alignedScore = alignedVisualScore(assetA, assetB, offset: align.offsetSeconds)
+            let (alignedScore, isCrop) = alignedVisualScore(assetA, assetB, offset: align.offsetSeconds)
+            if isCrop { isCroppedVariant = true }
             visualScore = ratio >= Double(config.durationRatioMin) ? max(visualScore, alignedScore) : alignedScore
 
             if ratio < Double(config.durationRatioMin), FileManager.default.fileExists(atPath: assetA.path.path) {
@@ -121,9 +123,11 @@ public final class MatchEngine: Sendable {
                     assetA.fingerprints = try await VideoAnalyzer.fingerprints(assetA, level: .medium, times: times)
                     assetB.fingerprints = try await VideoAnalyzer.fingerprints(assetB, level: .medium, times: times.map { $0 + align.offsetSeconds })
                 } catch { return nil }
-                visualScore = alignedVisualScore(assetA, assetB, offset: align.offsetSeconds)
-                // Allow down to 0.80 for partial/split clips or clips with logo/text overlays
-                guard visualScore >= 0.80 else { return nil }
+                let (refinedScore, isRefinedCrop) = alignedVisualScore(assetA, assetB, offset: align.offsetSeconds)
+                if isRefinedCrop { isCroppedVariant = true }
+                visualScore = refinedScore
+                // Allow down to 0.78 for partial/split clips or clips with logo/text overlays/crop
+                guard visualScore >= 0.78 else { return nil }
                 let matched = min(assetA.fingerprints.count, assetB.fingerprints.count)
                 alignment = AlignmentResult(
                     offsetSeconds: align.offsetSeconds,
@@ -137,6 +141,14 @@ public final class MatchEngine: Sendable {
         } else if ratio < Double(config.durationRatioMin) {
             // If duration differs and no timeline alignment could be established, avoid false positives
             return nil
+        }
+
+        // Cross-orientation detection (16:9 vs 9:16)
+        if let ma = assetA.metadata?.videoStream, let mb = assetB.metadata?.videoStream {
+            let isCross = (ma.aspectRatio >= 1.2 && mb.aspectRatio <= 0.95) || (mb.aspectRatio >= 1.2 && ma.aspectRatio <= 0.95)
+            if isCross && visualScore >= 0.78 {
+                isCroppedVariant = true
+            }
         }
 
         let timelineScore: Float = alignment?.alignmentConfidence ?? 0
@@ -175,6 +187,7 @@ public final class MatchEngine: Sendable {
             resolutionB: assetB.metadata?.videoStream.map { ($0.displayWidth, $0.displayHeight) },
             fpsA: assetA.metadata?.videoStream?.nominalFPS,
             fpsB: assetB.metadata?.videoStream?.nominalFPS,
+            isCroppedVariant: isCroppedVariant,
             matchedSamples: matchedSamples,
             totalSamples: totalSamples
         )
@@ -222,6 +235,19 @@ public final class MatchEngine: Sendable {
         if let ca = fpA.centerDHash, let cb = fpB.centerDHash {
             best = max(best, DHasher.similarity(ca, cb))
         }
+        // Cross Crop & Zoom check (Full vs Zoom, Center vs Zoom)
+        if let za = fpA.zoomDHash, let db = fpB.dHash {
+            best = max(best, DHasher.similarity(za, db))
+        }
+        if let da = fpA.dHash, let zb = fpB.zoomDHash {
+            best = max(best, DHasher.similarity(da, zb))
+        }
+        if let za = fpA.zoomDHash, let cb = fpB.centerDHash {
+            best = max(best, DHasher.similarity(za, cb))
+        }
+        if let ca = fpA.centerDHash, let zb = fpB.zoomDHash {
+            best = max(best, DHasher.similarity(ca, zb))
+        }
         return best
     }
 
@@ -232,6 +258,19 @@ public final class MatchEngine: Sendable {
         }
         if let ca = fpA.centerPHash, let cb = fpB.centerPHash {
             best = max(best, PHasher.similarity(ca, cb))
+        }
+        // Cross Crop & Zoom check for pHash
+        if let za = fpA.zoomPHash, let pb = fpB.pHash {
+            best = max(best, PHasher.similarity(za, pb))
+        }
+        if let pa = fpA.pHash, let zb = fpB.zoomPHash {
+            best = max(best, PHasher.similarity(pa, zb))
+        }
+        if let za = fpA.zoomPHash, let cb = fpB.centerPHash {
+            best = max(best, PHasher.similarity(za, cb))
+        }
+        if let ca = fpA.centerPHash, let zb = fpB.zoomPHash {
+            best = max(best, PHasher.similarity(ca, zb))
         }
         if let ga = fpA.gridPHashes, let gb = fpB.gridPHashes, ga.count == 4, gb.count == 4 {
             var qScores = [Float](repeating: 0, count: 4)
@@ -246,8 +285,8 @@ public final class MatchEngine: Sendable {
         return best
     }
 
-    private func frameCombinedSimilarity(_ a: FrameSample, _ b: FrameSample) -> Float {
-        guard let fpA = a.visualFingerprint, let fpB = b.visualFingerprint else { return 0 }
+    private func frameCombinedSimilarity(_ a: FrameSample, _ b: FrameSample) -> (score: Float, isCropped: Bool) {
+        guard let fpA = a.visualFingerprint, let fpB = b.visualFingerprint else { return (0, false) }
         let fullD = (fpA.dHash != nil && fpB.dHash != nil) ? DHasher.similarity(fpA.dHash!, fpB.dHash!) : 0
         let fullP = (fpA.pHash != nil && fpB.pHash != nil) ? PHasher.similarity(fpA.pHash!, fpB.pHash!) : 0
         let fullScore = fullD * 0.4 + fullP * 0.6
@@ -257,18 +296,48 @@ public final class MatchEngine: Sendable {
         let centerScore = (fpA.centerDHash != nil && fpB.centerDHash != nil) ? (centerD * 0.4 + centerP * 0.6) : 0
 
         let gridP = framePHashSimilarity(fpA, fpB)
-        return max(fullScore, centerScore, gridP)
+        let standardBest = max(fullScore, centerScore, gridP)
+
+        // Cross Zoom & Crop matching
+        var zoomBest: Float = 0
+        if let za = fpA.zoomDHash, let db = fpB.dHash, let zp = fpA.zoomPHash, let pb = fpB.pHash {
+            let s = DHasher.similarity(za, db) * 0.4 + PHasher.similarity(zp, pb) * 0.6
+            zoomBest = max(zoomBest, s)
+        }
+        if let da = fpA.dHash, let zb = fpB.zoomDHash, let pa = fpA.pHash, let zp = fpB.zoomPHash {
+            let s = DHasher.similarity(da, zb) * 0.4 + PHasher.similarity(pa, zp) * 0.6
+            zoomBest = max(zoomBest, s)
+        }
+        if let za = fpA.zoomDHash, let cb = fpB.centerDHash, let zp = fpA.zoomPHash, let cp = fpB.centerPHash {
+            let s = DHasher.similarity(za, cb) * 0.4 + PHasher.similarity(zp, cp) * 0.6
+            zoomBest = max(zoomBest, s)
+        }
+        if let ca = fpA.centerDHash, let zb = fpB.zoomDHash, let cp = fpA.centerPHash, let zp = fpB.zoomPHash {
+            let s = DHasher.similarity(ca, zb) * 0.4 + PHasher.similarity(cp, zp) * 0.6
+            zoomBest = max(zoomBest, s)
+        }
+
+        if zoomBest > standardBest && zoomBest >= 0.78 {
+            return (zoomBest, true)
+        }
+        return (standardBest, false)
     }
 
-    private func alignedVisualScore(_ a: VideoAsset, _ b: VideoAsset, offset: Double) -> Float {
+    private func alignedVisualScore(_ a: VideoAsset, _ b: VideoAsset, offset: Double) -> (score: Float, isCropped: Bool) {
         var scores: [Float] = []
+        var croppedCount = 0
         for sample in a.fingerprints {
             guard let other = b.fingerprints.min(by: { abs($0.timestampSeconds - sample.timestampSeconds - offset) < abs($1.timestampSeconds - sample.timestampSeconds - offset) }),
                   abs(other.timestampSeconds - sample.timestampSeconds - offset) <= config.alignmentToleranceSeconds else { continue }
-            scores.append(frameCombinedSimilarity(sample, other))
+            let res = frameCombinedSimilarity(sample, other)
+            scores.append(res.score)
+            if res.isCropped { croppedCount += 1 }
         }
         let minRequired = min(3, config.minimumAlignedSamples)
-        return scores.count >= minRequired ? scores.reduce(0, +) / Float(scores.count) : 0
+        guard scores.count >= minRequired else { return (0, false) }
+        let avg = scores.reduce(0, +) / Float(scores.count)
+        let isCrop = croppedCount >= max(1, scores.count / 3)
+        return (avg, isCrop)
     }
 
     // MARK: - Score computations
@@ -313,10 +382,10 @@ public final class MatchEngine: Sendable {
         return count > 0 ? total / Float(count) : 0
     }
 
-    private func dHashAndCenterTimestamps(_ asset: VideoAsset) -> [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?)] {
+    private func dHashAndCenterTimestamps(_ asset: VideoAsset) -> [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)] {
         asset.fingerprints.compactMap { sample in
             guard let hash = sample.visualFingerprint?.dHash else { return nil }
-            return (sample.timestampSeconds, hash, sample.visualFingerprint?.centerDHash)
+            return (sample.timestampSeconds, hash, sample.visualFingerprint?.centerDHash, sample.visualFingerprint?.zoomDHash)
         }
     }
 

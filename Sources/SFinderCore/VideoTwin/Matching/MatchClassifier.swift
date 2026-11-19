@@ -32,6 +32,7 @@ public struct MatchClassifier: Sendable {
         let resolutionB: (w: Int, h: Int)?
         let fpsA: Double?
         let fpsB: Double?
+        let isCroppedVariant: Bool
         let matchedSamples: Int
         let totalSamples: Int
     }
@@ -56,6 +57,11 @@ public struct MatchClassifier: Sendable {
         // This handles "near-exact" with 99%+ visual score.
         if visual >= 0.99 && coverage > 0.95 {
             return (.nearDuplicate, confidence)
+        }
+
+        // ── Cropped / Zoomed variant ──────────────────────────────────
+        if scores.isCroppedVariant && visual >= 0.78 {
+            return (.croppedVariant, confidence)
         }
 
         // ── Contained clip / Split segment ─────────────────────────────

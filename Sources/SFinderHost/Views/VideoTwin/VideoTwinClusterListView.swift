@@ -160,13 +160,14 @@ public struct VideoTwinClusterGroupCard: View {
                 .font(.system(size: 11, weight: .bold))
                 .foregroundStyle(CFinderTheme.textMuted)
             
-            Image(systemName: isExact ? "checkmark.seal.fill" : "sparkles.tv")
+            let isCropped = cluster.representativeMatchType == .croppedVariant
+            Image(systemName: isExact ? "checkmark.seal.fill" : (isCropped ? "crop" : "sparkles.tv"))
                 .font(.system(size: 11))
-                .foregroundStyle(isExact ? CFinderTheme.success : CFinderTheme.primaryLight)
+                .foregroundStyle(isExact ? CFinderTheme.success : (isCropped ? Color(hex: "A855F7") : CFinderTheme.primaryLight))
             
-            Text(isExact ? "Trùng 100%" : "Trùng nội dung")
+            Text(isExact ? "Trùng 100%" : (isCropped ? "Crop / Zoom khung hình" : "Trùng nội dung"))
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(CFinderTheme.textPrimary)
+                .foregroundStyle(isCropped ? Color(hex: "A855F7") : CFinderTheme.textPrimary)
             
             if !isExact {
                 Text(String(format: "%.0f%% tương đồng", cluster.overallSimilarity * 100))
