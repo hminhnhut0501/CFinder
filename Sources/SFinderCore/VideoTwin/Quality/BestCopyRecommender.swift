@@ -28,6 +28,15 @@ public actor BestCopyRecommender {
         return w * h
     }
 
+    private func effectiveBitrate(_ item: (member: ClusterMember, asset: VideoAsset, metrics: QualityMetrics)) -> Int64 {
+        if let b = item.asset.metadata?.videoStream?.bitrate, b > 0 { return b }
+        let dur = item.asset.metadata?.durationSeconds ?? 0
+        if dur > 0, item.asset.fileIdentity.fileSize > 0 {
+            return Int64(Double(item.asset.fileIdentity.fileSize * 8) / dur)
+        }
+        return 0
+    }
+
     public func recommend(for cluster: DuplicateCluster, assets: [UUID: VideoAsset], prefs: Preferences = Preferences()) async -> DuplicateCluster {
         guard cluster.members.count > 1 else { return cluster }
 
@@ -55,7 +64,10 @@ public actor BestCopyRecommender {
             return max(0, item.metrics.overallScore - mark.penalty)
         }
 
-        // TIERED SORTING: Resolution dominance first, then composite score, then bitrate
+        // TIERED SORTING:
+        // Tier 1: Dominant Resolution Check (e.g. 1080p vs 720p, 4K vs 1080p)
+        // Tier 2: Composite Quality Score (Resolution + Resolution-Aware Bitrate + Codec)
+        // Tier 3: Effective Bitrate (Higher Bitrate wins when resolutions are identical)
         evaluatedMembers.sort { a, b in
             // Clean watermark priority
             if cleanIDs.contains(a.asset.id) != cleanIDs.contains(b.asset.id) {
@@ -67,8 +79,7 @@ public actor BestCopyRecommender {
             let durA = a.asset.metadata?.durationSeconds ?? 0
             let durB = b.asset.metadata?.durationSeconds ?? 0
             
-            // Tier 1: Dominant Resolution Check (e.g. 1080p vs 720p, 4K vs 1080p)
-            // If one has >= 15% more pixels and has complete duration (within 90% of longest):
+            // Tier 1: Dominant Resolution Check
             if pixA > 0 && pixB > 0 && Double(max(pixA, pixB)) >= Double(min(pixA, pixB)) * 1.15 {
                 if pixA > pixB && durA >= longestDuration * 0.90 {
                     return true
@@ -78,16 +89,16 @@ public actor BestCopyRecommender {
                 }
             }
             
-            // Tier 2: Composite Quality Score (which includes sharpness, bitrate, FPS, HDR, codec)
+            // Tier 2: Composite Quality Score
             let scoreA = score(a)
             let scoreB = score(b)
-            if abs(scoreA - scoreB) > 0.001 {
+            if abs(scoreA - scoreB) > 0.5 {
                 return scoreA > scoreB
             }
             
-            // Tier 3: Highest Bitrate
-            let bA = a.asset.metadata?.videoStream?.bitrate ?? 0
-            let bB = b.asset.metadata?.videoStream?.bitrate ?? 0
+            // Tier 3: Effective Bitrate (Higher Bitrate Wins!)
+            let bA = effectiveBitrate(a)
+            let bB = effectiveBitrate(b)
             if bA != bB {
                 return bA > bB
             }
@@ -107,6 +118,13 @@ public actor BestCopyRecommender {
             let pixBest = pixelCount(best)
             let pixCandidate = pixelCount(candidate)
             if pixBest > 0 && pixCandidate > 0 && Double(pixBest) >= Double(pixCandidate) * 1.15 {
+                continue
+            }
+            
+            // If best has higher bitrate at same resolution, candidate can NEVER overturn it!
+            let bBest = effectiveBitrate(best)
+            let bCandidate = effectiveBitrate(candidate)
+            if bBest > 0 && bCandidate > 0 && Double(bBest) >= Double(bCandidate) * 1.20 {
                 continue
             }
             
@@ -148,11 +166,30 @@ public actor BestCopyRecommender {
         let pixC = pixelCount(candidate)
         let pixB = pixelCount(currentBest)
         
-        // NEVER prefer space saving if candidate has lower resolution!
+        // NEVER prefer candidate if it has lower resolution
+        if pixB > 0 && pixC > 0 && Double(pixB) >= Double(pixC) * 1.15 {
+            return false
+        }
+        if pixC > 0 && pixB > 0 && Double(pixC) >= Double(pixB) * 1.15 {
+            return true
+        }
+        
+        let bC = effectiveBitrate(candidate)
+        let bB = effectiveBitrate(currentBest)
+        
+        // NEVER prefer candidate if it has significantly lower bitrate!
+        if bB > 0 && bC > 0 && Double(bB) >= Double(bC) * 1.20 {
+            return false
+        }
+        if bC > 0 && bB > 0 && Double(bC) >= Double(bB) * 1.20 {
+            return true
+        }
+        
+        // Space saving ONLY if resolution AND bitrate are essentially identical (within 15%)
         if prefs.preferSpaceSaving {
-            // Only if resolutions are identical / equivalent (within 5%)
             let isSameRes = abs(pixC - pixB) <= Int(Double(max(pixC, pixB, 1)) * 0.05)
-            if isSameRes {
+            let isSameBitrate = abs(bC - bB) <= Int64(Double(max(bC, bB, 1)) * 0.15)
+            if isSameRes && isSameBitrate {
                 let sizeC = candidate.asset.fileIdentity.fileSize
                 let sizeB = currentBest.asset.fileIdentity.fileSize
                 if sizeC > 0 && sizeB > 0 && Double(min(sizeC, sizeB)) < Double(max(sizeC, sizeB)) * 0.90 {

@@ -229,19 +229,30 @@ public struct VideoScoringEngine: Sendable {
     public func compareVideos(reports: [VideoDetailedReport]) -> ComparisonVerdict? {
         guard reports.count >= 2 else { return nil }
         
-        // Sort with Resolution Dominance (Tier 1), then overall score
+        // Sort with Resolution Dominance (Tier 1), then Bitrate Dominance (Tier 2), then overall score
         let sorted = reports.sorted { a, b in
             let pixA = (a.primaryVideo?.displayWidth ?? 0) * (a.primaryVideo?.displayHeight ?? 0)
             let pixB = (b.primaryVideo?.displayWidth ?? 0) * (b.primaryVideo?.displayHeight ?? 0)
             
-            // If one has significantly higher resolution (>= 15% more pixels) and comparable duration
+            let durA = a.durationSeconds
+            let durB = b.durationSeconds
+            let maxDur = max(durA, durB)
+            
+            // Tier 1: Dominant Resolution
             if pixA > 0 && pixB > 0 && Double(max(pixA, pixB)) >= Double(min(pixA, pixB)) * 1.15 {
-                let durA = a.durationSeconds
-                let durB = b.durationSeconds
-                let maxDur = max(durA, durB)
                 if pixA > pixB && durA >= maxDur * 0.90 { return true }
                 if pixB > pixA && durB >= maxDur * 0.90 { return false }
             }
+            
+            // Tier 2: Bitrate Dominance (when resolutions are comparable)
+            let bA = (a.primaryVideo?.bitrate ?? 0) > 0 ? a.primaryVideo!.bitrate : (durA > 0 ? Int64(Double(a.fileSize * 8) / durA) : 0)
+            let bB = (b.primaryVideo?.bitrate ?? 0) > 0 ? b.primaryVideo!.bitrate : (durB > 0 ? Int64(Double(b.fileSize * 8) / durB) : 0)
+            
+            if bA > 0 && bB > 0 && Double(max(bA, bB)) >= Double(min(bA, bB)) * 1.25 {
+                if bA > bB && !a.score.isBloatedBitrate { return true }
+                if bB > bA && !b.score.isBloatedBitrate { return false }
+            }
+            
             return a.score.overallScore > b.score.overallScore
         }
         guard let winner = sorted.first else { return nil }

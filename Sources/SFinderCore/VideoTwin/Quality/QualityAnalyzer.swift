@@ -44,8 +44,8 @@ public actor QualityAnalyzer {
         let (bitrateScore, codecScore) = calculateBitrateAndCodecScore(vs, container: meta.container, effectiveBitrate: bitrate)
         let audioScore = calculateAudioScore(meta.audioStream)
 
-        // Quality First: Resolution dominates at 50%, Bitrate 25%, Codec 15%, Audio 10%
-        let rawScore = (resScore * 0.50) + (bitrateScore * 0.25) + (codecScore * 0.15) + (audioScore * 0.10)
+        // Quality First: Resolution dominates at 45%, Bitrate 35%, Codec 12%, Audio 8%
+        let rawScore = (resScore * 0.45) + (bitrateScore * 0.35) + (codecScore * 0.12) + (audioScore * 0.08)
 
         let upscaleSuspicion = detectUpscaleSuspicion(vs, effectiveBitrate: bitrate)
         let sharpnessValues = asset.fingerprints.compactMap(\.sharpness).sorted()
@@ -102,9 +102,9 @@ public actor QualityAnalyzer {
             score = 0.88
         } else if pixels >= 1_900_000 {  // 1080p FHD (1920×1080 = 2.07M)
             score = 0.78
-        } else if pixels >= 900_000 {   // 720p HD (1280×720 = 0.92M)
+        } else if pixels >= 800_000 {    // 720p HD (1280×720, 720×1284 = ~0.92M)
             score = 0.50
-        } else if pixels >= 380_000 {   // 480p SD (854×480 = 0.41M)
+        } else if pixels >= 350_000 {    // 480p SD (854×480 = 0.41M)
             score = 0.30
         } else {
             score = max(0.10, pixels / 1_500_000)
@@ -122,18 +122,54 @@ public actor QualityAnalyzer {
         let bitrate = Float(effectiveBitrate ?? video?.bitrate ?? 0)
 
         let codecScore: Float
-        let refBitrate: Float
-
         if codecStr.contains("hevc") || codecStr.contains("h265") || codecStr.contains("hvc1") {
-            codecScore = 1.0; refBitrate = 15_000_000
+            codecScore = 1.0
         } else if codecStr.contains("vp9") || codecStr.contains("av1") {
-            codecScore = 0.95; refBitrate = 15_000_000
+            codecScore = 0.95
         } else if codecStr.contains("h264") || codecStr.contains("avc") {
-            codecScore = 0.80; refBitrate = 25_000_000
+            codecScore = 0.80
         } else {
-            codecScore = 0.50; refBitrate = 30_000_000
+            codecScore = 0.50
         }
-        let bScore = bitrate > 0 ? min(1.0, max(0.2, bitrate / refBitrate)) : 0.5
+
+        // Resolution-aware reference bitrate target
+        let w = max(video?.displayWidth ?? 0, video?.width ?? 0)
+        let h = max(video?.displayHeight ?? 0, video?.height ?? 0)
+        let pixels = Float(w * h)
+        let isModern = codecScore >= 0.95
+
+        let refBitrate: Float
+        if pixels >= 8_000_000 {        // 4K UHD
+            refBitrate = isModern ? 14_000_000 : 22_000_000
+        } else if pixels >= 3_500_000 {  // 1440p
+            refBitrate = isModern ? 8_000_000 : 12_000_000
+        } else if pixels >= 1_900_000 {  // 1080p
+            refBitrate = isModern ? 3_500_000 : 5_500_000
+        } else if pixels >= 800_000 {    // 720p (720x1280, 720x1284)
+            refBitrate = isModern ? 1_800_000 : 2_800_000
+        } else if pixels >= 350_000 {    // 480p
+            refBitrate = isModern ? 800_000 : 1_300_000
+        } else {
+            refBitrate = isModern ? 500_000 : 800_000
+        }
+
+        let bScore: Float
+        if bitrate <= 0 {
+            bScore = 0.3
+        } else {
+            let ratio = bitrate / refBitrate
+            if ratio <= 1.2 {
+                // Proportional score up to optimal
+                bScore = min(1.0, max(0.1, ratio))
+            } else if ratio <= 3.5 {
+                // Plateau: plenty of bitrate, maximal visual fidelity
+                bScore = 1.0
+            } else {
+                // Excessively bloated bitrate: slight efficiency penalty
+                let bloat = (ratio - 3.5) / 2.0
+                bScore = max(0.65, 1.0 - bloat * 0.15)
+            }
+        }
         return (bScore, codecScore)
     }
 
