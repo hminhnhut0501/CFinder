@@ -281,6 +281,49 @@ testCase("Thêm ngày định dạng YYMMDD_ trước tiên (Tự động lấy 
     print("  ✓ Toàn bộ 5 định dạng ngày tháng đều hoạt động chính xác 100%")
 }
 
+// 10. Dynamic Token Flow Pipeline (Kéo thả, nhiều khối text tự do, thứ tự tùy ý)
+testCase("Dynamic Token Flow (Kéo thả, nhiều text, thứ tự token tự do)") {
+    let f1 = tempDir.appendingPathComponent("Seachan.mp4")
+    let f2 = tempDir.appendingPathComponent("Video_Review.mov")
+    try "data1".write(to: f1, atomically: true, encoding: .utf8)
+    try "data2".write(to: f2, atomically: true, encoding: .utf8)
+    
+    var components = DateComponents()
+    components.year = 2026; components.month = 11; components.day = 19
+    let testDate = Calendar(identifier: .gregorian).date(from: components)!
+    
+    // Kịch bản: [Date 261119_] + [Text "_TG@daocuVIP_"] + [Number 01] + [Text "_DMD"] + [Text "_v2"]
+    var rule = RenameRule()
+    rule.tokens = [
+        RenameToken(type: .date, dateFormat: .yyMMdd_),
+        RenameToken(type: .text, textValue: "_TG@daocuVIP_"),
+        RenameToken(type: .number, numberFormat: .twoDigits, startNumber: 1, step: 1),
+        RenameToken(type: .text, textValue: "_DMD"),
+        RenameToken(type: .text, textValue: "_v2")
+    ]
+    
+    let prev = BatchRenameEngine.shared.generatePreview(urls: [f1, f2], rule: rule, referenceDate: testDate)
+    assert(prev[0].newName == "261119__TG@daocuVIP_01_DMD_v2.mp4")
+    assert(prev[1].newName == "261119__TG@daocuVIP_02_DMD_v2.mov")
+    print("  ✓ Chuỗi token đa text: '\(prev[0].newName)'")
+    
+    // Đảo thứ tự: đưa Text "_DMD" lên trước Number
+    rule.tokens.swapAt(2, 3)
+    let prevSwapped = BatchRenameEngine.shared.generatePreview(urls: [f1], rule: rule, referenceDate: testDate)
+    assert(prevSwapped[0].newName == "261119__TG@daocuVIP__DMD01_v2.mp4")
+    print("  ✓ Đảo thứ tự thành công: '\(prevSwapped[0].newName)'")
+    
+    // Kết hợp OriginalName + Trim
+    var ruleWithOrig = RenameRule()
+    ruleWithOrig.tokens = [
+        RenameToken(type: .originalName, clearOriginal: false, deleteFirstN: 0, deleteLastN: 0),
+        RenameToken(type: .text, textValue: "_EDITED")
+    ]
+    let prevOrig = BatchRenameEngine.shared.generatePreview(urls: [f1], rule: ruleWithOrig, referenceDate: testDate)
+    assert(prevOrig[0].newName == "Seachan_EDITED.mp4")
+    print("  ✓ Giữ tên gốc + text: '\(prevOrig[0].newName)'")
+}
+
 print("\n================================================================================")
-print("🎉 TOÀN BỘ 9/9 BỘ KIỂM THỬ ĐẠT 100% HOÀN HẢO!")
+print("🎉 TOÀN BỘ 10/10 BỘ KIỂM THỬ ĐẠT 100% HOÀN HẢO!")
 print("================================================================================")

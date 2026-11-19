@@ -120,9 +120,9 @@ public struct BatchRenameView: View {
             updatePreview()
         }
         .onAppear {
-            if !rule.prefix.isEmpty { showPrefixBlock = true }
-            if !rule.suffix.isEmpty { showSuffixBlock = true }
-            if rule.deleteFirstN > 0 || rule.deleteLastN > 0 { showTrimBlock = true }
+            if rule.tokens.isEmpty {
+                rule.ensureTokensInitialized()
+            }
             if !rule.findText.isEmpty { showFindReplaceBlock = true }
             updatePreview()
             ambientPulse = true
@@ -289,13 +289,11 @@ public struct BatchRenameView: View {
     // MARK: - 2. Token Recipe Studio Area (Khối ghép công thức đổi tên thông minh)
     
     private var controlPanelArea: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            RecipeChainScrollView(
+        VStack(alignment: .leading, spacing: 8) {
+            RecipeTokenFlowView(
                 rule: $rule,
-                showPrefixBlock: $showPrefixBlock,
-                showSuffixBlock: $showSuffixBlock,
-                showTrimBlock: $showTrimBlock,
-                showFindReplaceBlock: $showFindReplaceBlock
+                showFindReplaceBlock: $showFindReplaceBlock,
+                onTokenChanged: { updatePreview() }
             )
             
             Divider().opacity(0.12)
@@ -577,6 +575,7 @@ public struct BatchRenameView: View {
         self.rule = RenameRule()
         self.rule.clearOriginalName = false
         self.rule.customBaseName = ""
+        self.rule.tokens = [RenameToken(type: .originalName, clearOriginal: false)]
         self.showPrefixBlock = false
         self.showSuffixBlock = false
         self.showTrimBlock = false
@@ -587,273 +586,396 @@ public struct BatchRenameView: View {
     }
 }
 
-// MARK: - Recipe Studio Block Views
+// MARK: - Recipe Studio Flow & Token Views
 
-struct RecipeChainScrollView: View {
-    @Binding var rule: RenameRule
-    @Binding var showPrefixBlock: Bool
-    @Binding var showSuffixBlock: Bool
-    @Binding var showTrimBlock: Bool
-    @Binding var showFindReplaceBlock: Bool
-    
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                rootBlock
-                dateBlock
-                trimBlock
-                prefixBlock
-                numberingBlock
-                suffixBlock
-                findReplaceBlock
-                addBlock
+public struct FlowLayout: Layout {
+    public var spacing: CGFloat = 6
+    public var lineSpacing: CGFloat = 6
+
+    public init(spacing: CGFloat = 6, lineSpacing: CGFloat = 6) {
+        self.spacing = spacing
+        self.lineSpacing = lineSpacing
+    }
+
+    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var maxWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > width && currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + lineSpacing
+                lineHeight = 0
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 3)
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            maxWidth = max(maxWidth, currentX)
         }
+
+        return CGSize(width: max(maxWidth - spacing, 0), height: currentY + lineHeight)
     }
-    
-    @ViewBuilder
-    private var rootBlock: some View {
-        RecipeRootControlView(
-            clearOriginalName: $rule.clearOriginalName,
-            customBaseName: $rule.customBaseName
-        )
-        recipeArrow
-    }
-    
-    @ViewBuilder
-    private var dateBlock: some View {
-        if rule.enableDatePrefix {
-            RecipeDateBlockView(
-                isEnabled: $rule.enableDatePrefix,
-                format: $rule.datePrefixFormat
-            )
-            recipeArrow
+
+    public func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var currentX = bounds.minX
+        var currentY = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX + size.width > bounds.maxX && currentX > bounds.minX {
+                currentX = bounds.minX
+                currentY += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            subview.place(at: CGPoint(x: currentX, y: currentY), proposal: ProposedViewSize(size))
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
         }
-    }
-    
-    @ViewBuilder
-    private var trimBlock: some View {
-        if rule.deleteFirstN > 0 || rule.deleteLastN > 0 || showTrimBlock {
-            RecipeTrimCharsBlockView(
-                deleteFirstN: $rule.deleteFirstN,
-                deleteLastN: $rule.deleteLastN,
-                onClose: {
-                    rule.deleteFirstN = 0
-                    rule.deleteLastN = 0
-                    showTrimBlock = false
-                }
-            )
-            recipeArrow
-        }
-    }
-    
-    @ViewBuilder
-    private var prefixBlock: some View {
-        if !rule.prefix.isEmpty || showPrefixBlock {
-            RecipePrefixBlockView(
-                prefix: $rule.prefix,
-                onClose: {
-                    rule.prefix = ""
-                    showPrefixBlock = false
-                }
-            )
-            recipeArrow
-        }
-    }
-    
-    @ViewBuilder
-    private var numberingBlock: some View {
-        if rule.enableNumbering {
-            RecipeNumberingBlockView(
-                isEnabled: $rule.enableNumbering,
-                format: $rule.numberingFormat,
-                position: $rule.numberingPosition,
-                startNumber: $rule.startNumber,
-                separator: $rule.numberingSeparator
-            )
-            recipeArrow
-        }
-    }
-    
-    @ViewBuilder
-    private var suffixBlock: some View {
-        if !rule.suffix.isEmpty || showSuffixBlock {
-            RecipeSuffixBlockView(
-                suffix: $rule.suffix,
-                onClose: {
-                    rule.suffix = ""
-                    showSuffixBlock = false
-                }
-            )
-            recipeArrow
-        }
-    }
-    
-    @ViewBuilder
-    private var findReplaceBlock: some View {
-        if !rule.findText.isEmpty || showFindReplaceBlock {
-            RecipeFindReplaceBlockView(
-                findText: $rule.findText,
-                replaceText: $rule.replaceText,
-                isRegex: $rule.isRegex,
-                matchCase: $rule.matchCase,
-                onClose: {
-                    rule.findText = ""
-                    rule.replaceText = ""
-                    showFindReplaceBlock = false
-                }
-            )
-            recipeArrow
-        }
-    }
-    
-    private var addBlock: some View {
-        RecipeAddBlockMenu(
-            rule: $rule,
-            showPrefixBlock: $showPrefixBlock,
-            showSuffixBlock: $showSuffixBlock,
-            showTrimBlock: $showTrimBlock,
-            showFindReplaceBlock: $showFindReplaceBlock
-        )
-    }
-    
-    private var recipeArrow: some View {
-        Image(systemName: "chevron.right")
-            .font(.system(size: 9.5, weight: .bold))
-            .foregroundColor(.white.opacity(0.25))
     }
 }
 
-struct RecipeRootControlView: View {
-    @Binding var clearOriginalName: Bool
-    @Binding var customBaseName: String
+struct RecipeTokenFlowView: View {
+    @Binding var rule: RenameRule
+    @Binding var showFindReplaceBlock: Bool
+    let onTokenChanged: () -> Void
     
     var body: some View {
-        HStack(spacing: 5) {
+        FlowLayout(spacing: 7, lineSpacing: 7) {
+            ForEach($rule.tokens) { $token in
+                let index = rule.tokens.firstIndex(where: { $0.id == token.id }) ?? 0
+                tokenChip(token: $token, index: index)
+            }
+            
+            if showFindReplaceBlock || !rule.findText.isEmpty {
+                RecipeFindReplaceBlockView(
+                    findText: $rule.findText,
+                    replaceText: $rule.replaceText,
+                    isRegex: $rule.isRegex,
+                    matchCase: $rule.matchCase,
+                    onClose: {
+                        rule.findText = ""
+                        rule.replaceText = ""
+                        showFindReplaceBlock = false
+                        onTokenChanged()
+                    }
+                )
+            }
+            
+            RecipeAddTokenMenu(
+                rule: $rule,
+                showFindReplaceBlock: $showFindReplaceBlock,
+                onTokenAdded: onTokenChanged
+            )
+        }
+    }
+    
+    @ViewBuilder
+    private func tokenChip(token: Binding<RenameToken>, index: Int) -> some View {
+        let canMoveLeft = index > 0
+        let canMoveRight = index < rule.tokens.count - 1
+        
+        switch token.wrappedValue.type {
+        case .originalName:
+            TokenOriginalNameChipView(
+                token: token,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: { moveToken(from: index, to: index - 1) },
+                onMoveRight: { moveToken(from: index, to: index + 1) }
+            )
+        case .date:
+            TokenDateChipView(
+                token: token,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: { moveToken(from: index, to: index - 1) },
+                onMoveRight: { moveToken(from: index, to: index + 1) },
+                onDelete: { deleteToken(at: index) }
+            )
+        case .text:
+            TokenTextChipView(
+                token: token,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: { moveToken(from: index, to: index - 1) },
+                onMoveRight: { moveToken(from: index, to: index + 1) },
+                onDelete: { deleteToken(at: index) }
+            )
+        case .number:
+            TokenNumberChipView(
+                token: token,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: { moveToken(from: index, to: index - 1) },
+                onMoveRight: { moveToken(from: index, to: index + 1) },
+                onDelete: { deleteToken(at: index) }
+            )
+        case .trim:
+            TokenTrimChipView(
+                token: token,
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: { moveToken(from: index, to: index - 1) },
+                onMoveRight: { moveToken(from: index, to: index + 1) },
+                onDelete: { deleteToken(at: index) }
+            )
+        }
+    }
+    
+    private func moveToken(from: Int, to: Int) {
+        guard from >= 0 && from < rule.tokens.count, to >= 0 && to < rule.tokens.count, from != to else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            let item = rule.tokens.remove(at: from)
+            rule.tokens.insert(item, at: to)
+        }
+        onTokenChanged()
+    }
+    
+    private func deleteToken(at index: Int) {
+        guard index >= 0 && index < rule.tokens.count else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
+            _ = rule.tokens.remove(at: index)
+        }
+        onTokenChanged()
+    }
+}
+
+struct ReorderArrowsView: View {
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 2) {
+            if canMoveLeft {
+                Button(action: onMoveLeft) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundColor(.white.opacity(0.65))
+                        .frame(width: 14, height: 16)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                .help("Di chuyển khối sang trái (đổi thứ tự)")
+            }
+            if canMoveRight {
+                Button(action: onMoveRight) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundColor(.white.opacity(0.65))
+                        .frame(width: 14, height: 16)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(3)
+                }
+                .buttonStyle(.plain)
+                .help("Di chuyển khối sang phải (đổi thứ tự)")
+            }
+        }
+    }
+}
+
+struct TokenOriginalNameChipView: View {
+    @Binding var token: RenameToken
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 4) {
             Menu {
                 Button(action: {
-                    clearOriginalName = false
-                    customBaseName = ""
+                    token.clearOriginal = false
+                    token.customBaseName = ""
                 }) {
-                    Label("Giữ nguyên tên gốc", systemImage: "doc.text")
+                    Label("Giữ tên gốc", systemImage: "doc.text")
                 }
-                
                 Button(action: {
-                    clearOriginalName = true
+                    token.clearOriginal = true
                 }) {
                     Label("Xóa sạch tên cũ", systemImage: "trash")
                 }
-                
                 Divider()
-                
                 Button(action: {
-                    clearOriginalName = true
-                    if customBaseName.isEmpty { customBaseName = "Item" }
+                    token.clearOriginal = true
+                    if token.customBaseName.isEmpty { token.customBaseName = "Item" }
                 }) {
                     Label("Đặt tên cơ sở mới...", systemImage: "pencil")
                 }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: clearOriginalName ? "trash.fill" : "doc.text.fill")
-                        .font(.system(size: 10.5, weight: .bold))
-                    Text(clearOriginalName ? "Xóa tên cũ" : "Giữ tên gốc")
+                HStack(spacing: 4) {
+                    Image(systemName: token.clearOriginal ? "trash.fill" : "doc.text.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text(token.clearOriginal ? "Xóa tên cũ" : "Giữ tên gốc")
                         .font(.system(size: 11, weight: .bold))
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 7, weight: .bold))
                         .opacity(0.6)
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 5)
-                .background(
-                    clearOriginalName
-                        ? Color(hex: "F43F5E").opacity(0.22)
-                        : Color.white.opacity(0.08)
-                )
-                .foregroundColor(clearOriginalName ? Color(hex: "F43F5E") : .white)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(
-                            clearOriginalName ? Color(hex: "F43F5E").opacity(0.4) : Color.white.opacity(0.18),
-                            lineWidth: 1
-                        )
-                )
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
+                .padding(.vertical, 4.5)
+                .foregroundColor(token.clearOriginal ? Color(hex: "F43F5E") : .white)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Khối #1: Chọn giữ tên gốc hoặc xóa sạch tên cũ để đánh số/ngày")
             
-            if clearOriginalName {
-                HStack(spacing: 3) {
-                    TextField("Tên mới...", text: $customBaseName)
+            if token.clearOriginal {
+                HStack(spacing: 2) {
+                    TextField("Tên mới...", text: $token.customBaseName)
                         .textFieldStyle(.plain)
                         .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .frame(width: 90)
-                    if !customBaseName.isEmpty {
-                        Button(action: { customBaseName = "" }) {
+                        .frame(width: 80)
+                    if !token.customBaseName.isEmpty {
+                        Button(action: { token.customBaseName = "" }) {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 9))
+                                .font(.system(size: 8.5))
                                 .foregroundColor(.white.opacity(0.45))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 4.5)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2.5)
                 .background(Color.white.opacity(0.06))
-                .cornerRadius(6)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
-                .help("Tùy chọn: Nhập tên cơ sở thay thế tên gốc hoặc để trống")
+                .cornerRadius(4)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            }
+            
+            if canMoveLeft || canMoveRight {
+                ReorderArrowsView(
+                    canMoveLeft: canMoveLeft,
+                    canMoveRight: canMoveRight,
+                    onMoveLeft: onMoveLeft,
+                    onMoveRight: onMoveRight
+                )
+                .padding(.trailing, 4)
             }
         }
+        .padding(.vertical, 2)
+        .background(
+            token.clearOriginal
+                ? Color(hex: "F43F5E").opacity(0.22)
+                : Color.white.opacity(0.08)
+        )
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(
+                    token.clearOriginal ? Color(hex: "F43F5E").opacity(0.4) : Color.white.opacity(0.18),
+                    lineWidth: 0.9
+                )
+        )
     }
 }
 
-struct RecipeDateBlockView: View {
-    @Binding var isEnabled: Bool
-    @Binding var format: DatePrefixFormat
+struct TokenTextChipView: View {
+    @Binding var token: RenameToken
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 3.5) {
+            Image(systemName: "character.cursor.ibeam")
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundColor(Color(hex: "06B6D4"))
+                .padding(.leading, 8)
+            
+            TextField("Nhập chữ...", text: $token.textValue)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .frame(minWidth: 70, maxWidth: 130)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(4)
+                .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            
+            ReorderArrowsView(
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: onMoveLeft,
+                onMoveRight: onMoveRight
+            )
+            
+            Button(action: onDelete) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Xóa khối chữ này")
+        }
+        .padding(.vertical, 3)
+        .background(Color(hex: "06B6D4").opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color(hex: "06B6D4").opacity(0.32), lineWidth: 0.9))
+    }
+}
+
+struct TokenDateChipView: View {
+    @Binding var token: RenameToken
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 3.5) {
             Menu {
                 ForEach(DatePrefixFormat.allCases, id: \.self) { fmt in
-                    Button(action: { format = fmt }) {
+                    Button(action: { token.dateFormat = fmt }) {
                         HStack {
                             Text(fmt.rawValue)
-                            if format == fmt { Image(systemName: "checkmark") }
+                            if token.dateFormat == fmt { Image(systemName: "checkmark") }
                         }
                     }
                 }
             } label: {
-                HStack(spacing: 4.5) {
+                HStack(spacing: 3.5) {
                     Image(systemName: "calendar")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 9.5, weight: .semibold))
                         .foregroundColor(CFinderTheme.FeatureColor.rename)
                     
-                    Text("Ngày:")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.75))
-                    
-                    Text(format.formatted())
+                    Text(token.dateFormat.formatted())
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .foregroundColor(CFinderTheme.FeatureColor.rename)
                     
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 7.5, weight: .bold))
+                        .font(.system(size: 7, weight: .bold))
                         .opacity(0.5)
                 }
                 .padding(.leading, 8)
-                .padding(.trailing, 4)
-                .padding(.vertical, 4.5)
+                .padding(.trailing, 3)
+                .padding(.vertical, 4)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             
-            Button(action: { isEnabled = false }) {
+            ReorderArrowsView(
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: onMoveLeft,
+                onMoveRight: onMoveRight
+            )
+            
+            Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 7.5, weight: .bold))
                     .foregroundColor(.white.opacity(0.55))
                     .padding(3)
                     .background(Color.white.opacity(0.08))
@@ -863,180 +985,68 @@ struct RecipeDateBlockView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Ngày")
         }
+        .padding(.vertical, 3)
         .background(CFinderTheme.FeatureColor.rename.opacity(0.12))
         .clipShape(Capsule())
         .overlay(Capsule().stroke(CFinderTheme.FeatureColor.rename.opacity(0.32), lineWidth: 0.9))
     }
 }
 
-struct RecipeTrimCharsBlockView: View {
-    @Binding var deleteFirstN: Int
-    @Binding var deleteLastN: Int
-    let onClose: () -> Void
+struct TokenNumberChipView: View {
+    @Binding var token: RenameToken
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "scissors")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color.orange)
-                .padding(.leading, 8)
-            
-            Text("Cắt:")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
-            
-            HStack(spacing: 3) {
-                Text("Đầu")
-                    .font(.system(size: 9.5))
-                    .foregroundColor(.secondary)
-                NumberInputField(value: $deleteFirstN, range: 0...999)
-                    .frame(width: 50)
-            }
-            
-            HStack(spacing: 3) {
-                Text("Đuôi")
-                    .font(.system(size: 9.5))
-                    .foregroundColor(.secondary)
-                NumberInputField(value: $deleteLastN, range: 0...999)
-                    .frame(width: 50)
-            }
-            
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 6)
-            .help("Gỡ khối Cắt ký tự")
-        }
-        .padding(.vertical, 3.5)
-        .background(Color.orange.opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 0.9))
-    }
-}
-
-struct RecipePrefixBlockView: View {
-    @Binding var prefix: String
-    let onClose: () -> Void
-    
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "text.insert")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color(hex: "06B6D4"))
-                .padding(.leading, 8)
-            
-            Text("Tiền tố:")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
-            
-            TextField("TG@...", text: $prefix)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .frame(minWidth: 80, maxWidth: 140)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2.5)
-                .background(Color.white.opacity(0.06))
-                .cornerRadius(5)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
-            
-            Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundColor(.white.opacity(0.55))
-                    .padding(3)
-                    .background(Color.white.opacity(0.08))
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .padding(.trailing, 6)
-            .help("Gỡ khối Tiền tố")
-        }
-        .padding(.vertical, 3.5)
-        .background(Color(hex: "06B6D4").opacity(0.12))
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "06B6D4").opacity(0.3), lineWidth: 0.9))
-    }
-}
-
-struct RecipeNumberingBlockView: View {
-    @Binding var isEnabled: Bool
-    @Binding var format: NumberingFormat
-    @Binding var position: NumberingPosition
-    @Binding var startNumber: Int
-    @Binding var separator: String
-    
-    var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 3.5) {
             Image(systemName: "number")
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: 9.5, weight: .bold))
                 .foregroundColor(Color(hex: "8B5CF6"))
                 .padding(.leading, 8)
-            
-            Text("Đánh số:")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
             
             Menu {
                 ForEach(NumberingFormat.allCases, id: \.self) { fmt in
-                    Button(action: { format = fmt }) {
+                    Button(action: { token.numberFormat = fmt }) {
                         HStack {
                             Text(fmt.rawValue)
-                            if format == fmt { Image(systemName: "checkmark") }
+                            if token.numberFormat == fmt { Image(systemName: "checkmark") }
                         }
                     }
                 }
             } label: {
-                HStack(spacing: 3) {
-                    Text(format.rawValue)
+                HStack(spacing: 2.5) {
+                    Text(token.numberFormat.rawValue)
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 7.5, weight: .bold))
-                        .opacity(0.6)
-                }
-                .foregroundColor(Color(hex: "8B5CF6"))
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            
-            Menu {
-                ForEach(NumberingPosition.allCases, id: \.self) { pos in
-                    Button(action: { position = pos }) {
-                        HStack {
-                            Text(pos.rawValue)
-                            if position == pos { Image(systemName: "checkmark") }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(position == .prefix ? "Đầu tên" : (position == .suffix ? "Cuối tên" : "Chỉ số"))
-                        .font(.system(size: 10.5, weight: .medium))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7, weight: .bold))
                         .opacity(0.6)
                 }
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(Color(hex: "8B5CF6"))
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             
-            HStack(spacing: 2) {
+            HStack(spacing: 1.5) {
                 Text("từ")
-                    .font(.system(size: 9.5))
+                    .font(.system(size: 9))
                     .foregroundColor(.secondary)
-                NumberInputField(value: $startNumber, range: 0...999999)
-                    .frame(width: 48)
+                NumberInputField(value: $token.startNumber, range: 0...999999)
+                    .frame(width: 42)
             }
             
-            Button(action: { isEnabled = false }) {
+            ReorderArrowsView(
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: onMoveLeft,
+                onMoveRight: onMoveRight
+            )
+            
+            Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 7.5, weight: .bold))
                     .foregroundColor(.white.opacity(0.55))
                     .padding(3)
                     .background(Color.white.opacity(0.08))
@@ -1046,41 +1056,54 @@ struct RecipeNumberingBlockView: View {
             .padding(.trailing, 6)
             .help("Gỡ khối Đánh số")
         }
-        .padding(.vertical, 3.5)
+        .padding(.vertical, 3)
         .background(Color(hex: "8B5CF6").opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "8B5CF6").opacity(0.3), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color(hex: "8B5CF6").opacity(0.32), lineWidth: 0.9))
     }
 }
 
-struct RecipeSuffixBlockView: View {
-    @Binding var suffix: String
-    let onClose: () -> Void
+struct TokenTrimChipView: View {
+    @Binding var token: RenameToken
+    let canMoveLeft: Bool
+    let canMoveRight: Bool
+    let onMoveLeft: () -> Void
+    let onMoveRight: () -> Void
+    let onDelete: () -> Void
     
     var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "text.append")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(Color(hex: "3B82F6"))
+        HStack(spacing: 3.5) {
+            Image(systemName: "scissors")
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundColor(Color.orange)
                 .padding(.leading, 8)
             
-            Text("Hậu tố:")
-                .font(.system(size: 10.5, weight: .medium))
-                .foregroundColor(.white.opacity(0.75))
+            HStack(spacing: 2) {
+                Text("Đầu")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                NumberInputField(value: $token.deleteFirstN, range: 0...999)
+                    .frame(width: 38)
+            }
             
-            TextField("_v1...", text: $suffix)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .frame(minWidth: 80, maxWidth: 140)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2.5)
-                .background(Color.white.opacity(0.06))
-                .cornerRadius(5)
-                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            HStack(spacing: 2) {
+                Text("Đuôi")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+                NumberInputField(value: $token.deleteLastN, range: 0...999)
+                    .frame(width: 38)
+            }
             
-            Button(action: onClose) {
+            ReorderArrowsView(
+                canMoveLeft: canMoveLeft,
+                canMoveRight: canMoveRight,
+                onMoveLeft: onMoveLeft,
+                onMoveRight: onMoveRight
+            )
+            
+            Button(action: onDelete) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 7.5, weight: .bold))
                     .foregroundColor(.white.opacity(0.55))
                     .padding(3)
                     .background(Color.white.opacity(0.08))
@@ -1088,12 +1111,12 @@ struct RecipeSuffixBlockView: View {
             }
             .buttonStyle(.plain)
             .padding(.trailing, 6)
-            .help("Gỡ khối Hậu tố")
+            .help("Gỡ khối Cắt ký tự")
         }
-        .padding(.vertical, 3.5)
-        .background(Color(hex: "3B82F6").opacity(0.12))
+        .padding(.vertical, 3)
+        .background(Color.orange.opacity(0.12))
         .clipShape(Capsule())
-        .overlay(Capsule().stroke(Color(hex: "3B82F6").opacity(0.3), lineWidth: 0.9))
+        .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 0.9))
     }
 }
 
@@ -1174,57 +1197,62 @@ struct RecipeFindReplaceBlockView: View {
     }
 }
 
-struct RecipeAddBlockMenu: View {
+struct RecipeAddTokenMenu: View {
     @Binding var rule: RenameRule
-    @Binding var showPrefixBlock: Bool
-    @Binding var showSuffixBlock: Bool
-    @Binding var showTrimBlock: Bool
     @Binding var showFindReplaceBlock: Bool
+    let onTokenAdded: () -> Void
     
     var body: some View {
         Menu {
             Button(action: {
-                withAnimation { rule.enableDatePrefix = true }
+                withAnimation {
+                    rule.tokens.append(RenameToken(type: .text, textValue: ""))
+                }
+                onTokenAdded()
             }) {
-                Label("Thêm Ngày tự động (YYMMDD_)", systemImage: "calendar")
-            }
-            
-            Button(action: {
-                withAnimation { showPrefixBlock = true }
-            }) {
-                Label("Thêm Tiền tố (Prefix)", systemImage: "text.insert")
+                Label("Thêm Chữ (Text)", systemImage: "character.cursor.ibeam")
             }
             
             Button(action: {
                 withAnimation {
-                    rule.enableNumbering = true
-                    rule.numberingPosition = .prefix
+                    rule.tokens.append(RenameToken(type: .date, dateFormat: .yyMMdd_))
                 }
+                onTokenAdded()
+            }) {
+                Label("Thêm Ngày (YYMMDD_)", systemImage: "calendar")
+            }
+            
+            Button(action: {
+                withAnimation {
+                    rule.tokens.append(RenameToken(type: .number, numberFormat: .twoDigits, startNumber: 1))
+                }
+                onTokenAdded()
             }) {
                 Label("Thêm Đánh số thứ tự (01, 02...)", systemImage: "number")
             }
             
             Button(action: {
-                withAnimation { showSuffixBlock = true }
-            }) {
-                Label("Thêm Hậu tố (Suffix)", systemImage: "text.append")
-            }
-            
-            Button(action: {
-                withAnimation { showTrimBlock = true }
+                withAnimation {
+                    rule.tokens.append(RenameToken(type: .trim, deleteFirstN: 0, deleteLastN: 0))
+                }
+                onTokenAdded()
             }) {
                 Label("Thêm Cắt bớt ký tự (Đầu/Đuôi)", systemImage: "scissors")
             }
             
+            Divider()
+            
             Button(action: {
-                withAnimation { showFindReplaceBlock = true }
+                withAnimation {
+                    showFindReplaceBlock = true
+                }
             }) {
                 Label("Thêm Tìm & Thay thế chữ", systemImage: "magnifyingglass")
             }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 10.5, weight: .bold))
                 Text("Thêm khối")
                     .font(.system(size: 11, weight: .semibold))
                 Image(systemName: "chevron.down")
@@ -1232,7 +1260,7 @@ struct RecipeAddBlockMenu: View {
                     .opacity(0.6)
             }
             .padding(.horizontal, 9)
-            .padding(.vertical, 5)
+            .padding(.vertical, 4.5)
             .background(
                 LinearGradient(
                     colors: [CFinderTheme.FeatureColor.rename.opacity(0.25), Color(hex: "7C3AED").opacity(0.25)],
@@ -1256,7 +1284,7 @@ struct RecipeAddBlockMenu: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .help("Thêm các khối ghép tên: Ngày, Tiền tố, Đánh số, Hậu tố, Cắt ký tự, Tìm thay thế")
+        .help("Thêm các khối ghép tên: Chữ, Ngày, Đánh số, Cắt ký tự, Tìm thay thế")
     }
 }
 

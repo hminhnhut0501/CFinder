@@ -85,21 +85,126 @@ public final class BatchRenameEngine: Sendable {
             
             var workingName = baseName
             
-            // 0. Reset / Xóa sạch ký tự tên gốc
-            if rule.clearOriginalName || rule.numberingPosition == .replace {
-                workingName = rule.customBaseName
+            if !rule.tokens.isEmpty {
+                // MARK: - Dynamic Token Recipe Pipeline (Strict Order Execution)
+                var parts: [String] = []
+                for token in rule.tokens {
+                    switch token.type {
+                    case .originalName:
+                        if token.clearOriginal {
+                            if !token.customBaseName.isEmpty {
+                                parts.append(token.customBaseName)
+                            }
+                        } else {
+                            var o = baseName
+                            if token.deleteFirstN > 0 {
+                                o = String(o.dropFirst(min(token.deleteFirstN, o.count)))
+                            }
+                            if token.deleteLastN > 0 {
+                                o = String(o.dropLast(min(token.deleteLastN, o.count)))
+                            }
+                            parts.append(o)
+                        }
+                    case .date:
+                        parts.append(token.dateFormat.formatted(date: referenceDate))
+                    case .text:
+                        if !token.textValue.isEmpty {
+                            parts.append(token.textValue)
+                        }
+                    case .number:
+                        let currentNum = token.startNumber + (index * token.step)
+                        let numStr = formatNumber(currentNum, format: token.numberFormat)
+                        if !token.separator.isEmpty {
+                            parts.append("\(token.separator)\(numStr)")
+                        } else {
+                            parts.append(numStr)
+                        }
+                    case .trim:
+                        var str = parts.joined()
+                        if token.deleteFirstN > 0 {
+                            str = String(str.dropFirst(min(token.deleteFirstN, str.count)))
+                        }
+                        if token.deleteLastN > 0 {
+                            str = String(str.dropLast(min(token.deleteLastN, str.count)))
+                        }
+                        parts = [str]
+                    }
+                }
+                workingName = parts.joined()
+                
+                // Prevent empty file name when clearOriginal is true and no other tokens have text
+                if workingName.isEmpty {
+                    let currentNum = rule.startNumber + (index * rule.step)
+                    workingName = formatNumber(currentNum, format: rule.numberingFormat)
+                }
+            } else {
+                // MARK: - Legacy Sequential Pipeline
+                // 0. Reset / Xóa sạch ký tự tên gốc
+                if rule.clearOriginalName || rule.numberingPosition == .replace {
+                    workingName = rule.customBaseName
+                }
+                
+                // 0.5. Xóa X ký tự phía trước (đầu) / phía sau (cuối)
+                if !rule.clearOriginalName && rule.numberingPosition != .replace {
+                    if rule.deleteFirstN > 0 {
+                        workingName = String(workingName.dropFirst(rule.deleteFirstN))
+                    }
+                    if rule.deleteLastN > 0 {
+                        workingName = String(workingName.dropLast(rule.deleteLastN))
+                    }
+                }
+                
+                // 4. Sequence Numbering
+                if rule.enableNumbering {
+                    let currentNum = rule.startNumber + (index * rule.step)
+                    let numStr = formatNumber(currentNum, format: rule.numberingFormat)
+                    
+                    if rule.clearOriginalName || rule.numberingPosition == .replace {
+                        if workingName.isEmpty {
+                            workingName = numStr
+                        } else {
+                            workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                        }
+                    } else {
+                        switch rule.numberingPosition {
+                        case .prefix:
+                            workingName = workingName.isEmpty ? numStr : "\(numStr)\(rule.numberingSeparator)\(workingName)"
+                        case .suffix:
+                            workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                        case .replace:
+                            workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                        }
+                    }
+                }
+                
+                // 5. Prefix & Suffix (Thêm text trước / sau)
+                if rule.enablePrefixSuffix || !rule.prefix.isEmpty || !rule.suffix.isEmpty {
+                    if !rule.prefix.isEmpty {
+                        workingName = "\(rule.prefix)\(workingName)"
+                    }
+                    if !rule.suffix.isEmpty {
+                        workingName = "\(workingName)\(rule.suffix)"
+                    }
+                }
+                
+                // Prevent empty file name
+                if workingName.isEmpty {
+                    if rule.clearOriginalName || rule.numberingPosition == .replace {
+                        let currentNum = rule.startNumber + (index * rule.step)
+                        workingName = formatNumber(currentNum, format: rule.numberingFormat)
+                    } else {
+                        workingName = baseName
+                    }
+                }
+                
+                // 5.5. Date Prefix (Thêm ngày định dạng YYMMDD_ trước tiên)
+                if rule.enableDatePrefix {
+                    let dateStr = rule.datePrefixFormat.formatted(date: referenceDate)
+                    workingName = "\(dateStr)\(workingName)"
+                }
             }
             
-            // 0.5. Xóa X ký tự phía trước (đầu) / phía sau (cuối)
-            if !rule.clearOriginalName && rule.numberingPosition != .replace {
-                if rule.deleteFirstN > 0 {
-                    workingName = String(workingName.dropFirst(rule.deleteFirstN))
-                }
-                if rule.deleteLastN > 0 {
-                    workingName = String(workingName.dropLast(rule.deleteLastN))
-                }
-            }
-            
+            // MARK: - Global Transformations (Applied to all modes)
             // 1. Find & Replace
             if rule.enableFindReplace && !rule.findText.isEmpty {
                 if rule.isRegex {
@@ -121,55 +226,6 @@ public final class BatchRenameEngine: Sendable {
             // 3. Case Transformation
             if rule.caseTransform != .none {
                 workingName = transformCase(workingName, to: rule.caseTransform)
-            }
-            
-            // 4. Sequence Numbering
-            if rule.enableNumbering {
-                let currentNum = rule.startNumber + (index * rule.step)
-                let numStr = formatNumber(currentNum, format: rule.numberingFormat)
-                
-                if rule.clearOriginalName || rule.numberingPosition == .replace {
-                    if workingName.isEmpty {
-                        workingName = numStr
-                    } else {
-                        workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
-                    }
-                } else {
-                    switch rule.numberingPosition {
-                    case .prefix:
-                        workingName = workingName.isEmpty ? numStr : "\(numStr)\(rule.numberingSeparator)\(workingName)"
-                    case .suffix:
-                        workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
-                    case .replace:
-                        workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
-                    }
-                }
-            }
-            
-            // 5. Prefix & Suffix (Thêm text trước / sau)
-            if rule.enablePrefixSuffix || !rule.prefix.isEmpty || !rule.suffix.isEmpty {
-                if !rule.prefix.isEmpty {
-                    workingName = "\(rule.prefix)\(workingName)"
-                }
-                if !rule.suffix.isEmpty {
-                    workingName = "\(workingName)\(rule.suffix)"
-                }
-            }
-            
-            // Prevent empty file name
-            if workingName.isEmpty {
-                if rule.clearOriginalName || rule.numberingPosition == .replace {
-                    let currentNum = rule.startNumber + (index * rule.step)
-                    workingName = formatNumber(currentNum, format: rule.numberingFormat)
-                } else {
-                    workingName = baseName
-                }
-            }
-            
-            // 5.5. Date Prefix (Thêm ngày định dạng YYMMDD_ trước tiên - Tự động lấy hôm nay)
-            if rule.enableDatePrefix {
-                let dateStr = rule.datePrefixFormat.formatted(date: referenceDate)
-                workingName = "\(dateStr)\(workingName)"
             }
             
             // 6. Space formatting

@@ -63,6 +63,67 @@ public enum NumberingFormat: String, CaseIterable, Codable, Sendable {
     case brackets = "[1], [2], [3]..."
 }
 
+public enum RenameTokenType: String, Codable, Sendable {
+    case originalName
+    case date
+    case text
+    case number
+    case trim
+}
+
+public struct RenameToken: Identifiable, Codable, Equatable, Hashable, Sendable {
+    public var id: UUID
+    public var type: RenameTokenType
+    
+    // Original Name properties (if type == .originalName)
+    public var clearOriginal: Bool
+    public var customBaseName: String
+    
+    // Date properties (if type == .date)
+    public var dateFormat: DatePrefixFormat
+    
+    // Text properties (if type == .text)
+    public var textValue: String
+    
+    // Numbering properties (if type == .number)
+    public var numberFormat: NumberingFormat
+    public var startNumber: Int
+    public var step: Int
+    public var separator: String
+    
+    // Trim properties (if type == .trim)
+    public var deleteFirstN: Int
+    public var deleteLastN: Int
+    
+    public init(
+        id: UUID = UUID(),
+        type: RenameTokenType,
+        clearOriginal: Bool = false,
+        customBaseName: String = "",
+        dateFormat: DatePrefixFormat = .yyMMdd_,
+        textValue: String = "",
+        numberFormat: NumberingFormat = .twoDigits,
+        startNumber: Int = 1,
+        step: Int = 1,
+        separator: String = "",
+        deleteFirstN: Int = 0,
+        deleteLastN: Int = 0
+    ) {
+        self.id = id
+        self.type = type
+        self.clearOriginal = clearOriginal
+        self.customBaseName = customBaseName
+        self.dateFormat = dateFormat
+        self.textValue = textValue
+        self.numberFormat = numberFormat
+        self.startNumber = startNumber
+        self.step = step
+        self.separator = separator
+        self.deleteFirstN = deleteFirstN
+        self.deleteLastN = deleteLastN
+    }
+}
+
 public enum ExtensionTransform: String, CaseIterable, Codable, Sendable {
     case keep = "Giữ nguyên đuôi tệp"
     case lowercase = "Đuôi viết thường (.jpg)"
@@ -71,7 +132,10 @@ public enum ExtensionTransform: String, CaseIterable, Codable, Sendable {
 }
 
 public struct RenameRule: Codable, Equatable, Sendable {
-    // 0. Reset / Xóa sạch ký tự tên gốc
+    // Dynamic Token Recipe Pipeline (Thứ tự token tự do kéo thả, hỗ trợ nhiều text)
+    public var tokens: [RenameToken] = []
+    
+    // 0. Reset / Xóa sạch ký tự tên gốc (Khối #1)
     public var clearOriginalName: Bool = false // Xóa hết toàn bộ ký tự tên gốc để bắt đầu từ đầu
     public var customBaseName: String = ""     // Tên mới cơ sở (tuỳ chọn)
     
@@ -121,10 +185,33 @@ public struct RenameRule: Codable, Equatable, Sendable {
     public var replaceSpacesWithUnderscore: Bool = false // Khoảng trắng -> Dấu gạch dưới (_)
     public var trimSpaces: Bool = true // Xóa khoảng trắng đầu & cuối
     
-    public init() {}
+    public init() {
+        self.tokens = []
+    }
+    
+    public mutating func ensureTokensInitialized() {
+        if tokens.isEmpty {
+            var list: [RenameToken] = []
+            if enableDatePrefix {
+                list.append(RenameToken(type: .date, dateFormat: datePrefixFormat))
+            }
+            if !prefix.isEmpty {
+                list.append(RenameToken(type: .text, textValue: prefix))
+            }
+            list.append(RenameToken(type: .originalName, clearOriginal: clearOriginalName, customBaseName: customBaseName, deleteFirstN: deleteFirstN, deleteLastN: deleteLastN))
+            if enableNumbering {
+                list.append(RenameToken(type: .number, numberFormat: numberingFormat, startNumber: startNumber, step: step, separator: numberingSeparator))
+            }
+            if !suffix.isEmpty {
+                list.append(RenameToken(type: .text, textValue: suffix))
+            }
+            self.tokens = list
+        }
+    }
     
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try container.decodeIfPresent([RenameToken].self, forKey: .tokens) ?? []
         clearOriginalName = try container.decodeIfPresent(Bool.self, forKey: .clearOriginalName) ?? false
         customBaseName = try container.decodeIfPresent(String.self, forKey: .customBaseName) ?? ""
         
@@ -160,6 +247,10 @@ public struct RenameRule: Codable, Equatable, Sendable {
         replaceSpacesWithDash = try container.decodeIfPresent(Bool.self, forKey: .replaceSpacesWithDash) ?? false
         replaceSpacesWithUnderscore = try container.decodeIfPresent(Bool.self, forKey: .replaceSpacesWithUnderscore) ?? false
         trimSpaces = try container.decodeIfPresent(Bool.self, forKey: .trimSpaces) ?? true
+        
+        if tokens.isEmpty {
+            ensureTokensInitialized()
+        }
     }
 }
 
