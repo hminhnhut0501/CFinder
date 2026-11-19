@@ -34,7 +34,7 @@ public struct SimilarityConfiguration: Sendable, Codable {
     public var earlyRejectFrameThreshold: Float = 0.20
     public var earlyRejectFrameCount: Int = 3
 
-    public var alignmentToleranceSeconds: Double = 0.5
+    public var alignmentToleranceSeconds: Double = 0.85
     public var maxCandidatesPerAsset: Int = 64
     public var coarseCandidateDistance: Int = 16
 

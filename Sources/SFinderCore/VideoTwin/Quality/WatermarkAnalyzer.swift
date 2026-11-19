@@ -36,7 +36,7 @@ public actor WatermarkAnalyzer {
         let decodedB = try await frames(b.path, times: timesA.map { $0 + offset })
         let indices = decodedA.keys.filter { index in
             guard let frameA = decodedA[index], let frameB = decodedB[index] else { return false }
-            return abs(frameA.time - frameB.time + offset) < 0.08
+            return abs(frameA.time - frameB.time + offset) < 0.25
         }.sorted()
         let framesA = indices.compactMap { decodedA[$0] }, framesB = indices.compactMap { decodedB[$0] }
         try Task.checkCancellation()
@@ -56,9 +56,9 @@ public actor WatermarkAnalyzer {
     private func frames(_ url: URL, times: [Double]) async throws -> [Int: Frame] {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 480, height: 320)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.05, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
+        generator.maximumSize = CGSize(width: 320, height: 180)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.20, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.20, preferredTimescale: 600)
         let cancellation = WatermarkDecodeCancellation(generator)
         var frames: [Int: Frame] = [:]
         try await withTaskCancellationHandler {

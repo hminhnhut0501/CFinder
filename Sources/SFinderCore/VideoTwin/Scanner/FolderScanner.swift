@@ -271,7 +271,7 @@ public final class FolderScanner: ObservableObject {
 
         // Recheck thermal limits between batches.
         while start < assetsToAnalyze.count {
-            let concurrency = min(4, max(1, await resourceController.recommendedDecodeWorkers()))
+            let concurrency = min(8, max(2, await resourceController.recommendedDecodeWorkers()))
             try Task.checkCancellation()
             await pauseToken.checkPause()
             try Task.checkCancellation()
@@ -418,9 +418,19 @@ public final class FolderScanner: ObservableObject {
         let watermarkAnalyzer = WatermarkAnalyzer()
         let dismissedWatermarks = await MainActor.run { Set(UserDefaults.standard.stringArray(forKey: "dismissedWatermarkFiles") ?? []) }
         for id in byID.keys { byID[id]?.watermark = nil }
-        // Limit watermark overlay examination to at most 60 near-duplicate candidate pairs to prevent Vision OOM
-        let nonExactMatches = matches.filter { $0.matchType != .exact }
-        let matchesToExamine = Array(nonExactMatches.prefix(60))
+        // Limit watermark overlay examination to near-duplicate candidate pairs with identical resolution tiers
+        // (if resolution differs >= 15%, dominant resolution already decides best copy without needing slow OCR)
+        let nonExactMatches = matches.filter { match in
+            guard match.matchType != .exact,
+                  let a = byID[match.assetAID],
+                  let b = byID[match.assetBID],
+                  let pixA = a.metadata?.videoStream.map({ $0.displayWidth * $0.displayHeight }),
+                  let pixB = b.metadata?.videoStream.map({ $0.displayWidth * $0.displayHeight }),
+                  pixA > 0, pixB > 0 else { return false }
+            let maxPix = max(pixA, pixB), minPix = min(pixA, pixB)
+            return Double(maxPix) < Double(minPix) * 1.15
+        }
+        let matchesToExamine = Array(nonExactMatches.prefix(20))
 
         for match in matchesToExamine {
             try Task.checkCancellation()

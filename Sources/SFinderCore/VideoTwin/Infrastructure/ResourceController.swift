@@ -25,13 +25,21 @@ public actor ResourceController {
         case .balanced: base = max(2, cores / 2)
         case .maximum: base = cores
         }
-        let memoryLimit = ProcessInfo.processInfo.physicalMemory < 8 * 1024 * 1024 * 1024 ? 2 : 4
+        let memBytes = ProcessInfo.processInfo.physicalMemory
+        let memoryLimit: Int
+        if memBytes < 8 * 1024 * 1024 * 1024 {
+            memoryLimit = 2
+        } else if memBytes < 16 * 1024 * 1024 * 1024 {
+            memoryLimit = 4
+        } else {
+            memoryLimit = 8
+        }
         let thermalLimit: Int
         switch ProcessInfo.processInfo.thermalState {
-        case .nominal: thermalLimit = 4
-        case .fair: thermalLimit = 2
+        case .nominal: thermalLimit = 8
+        case .fair: thermalLimit = 4
         case .serious, .critical: thermalLimit = 1
-        @unknown default: thermalLimit = 1
+        @unknown default: thermalLimit = 2
         }
         return max(1, min(base, memoryLimit, thermalLimit))
     }

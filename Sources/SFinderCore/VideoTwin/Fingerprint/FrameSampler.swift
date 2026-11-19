@@ -75,7 +75,7 @@ public actor FrameSampler {
 
     /// Absolute early-second anchors so videos of different lengths sharing the
     /// same opening seconds (e.g. split clips, trimmed intros) share exact timestamps.
-    public static let earlyAnchorSeconds: [Double] = [0.5, 1.5, 3.0, 5.0, 8.0]
+    public static let earlyAnchorSeconds: [Double] = [1.0, 3.0, 6.0]
 
     /// Sample frames at the given level for `assetURL`.
     /// Returns frames in temporal order.
@@ -138,9 +138,12 @@ public actor FrameSampler {
 
         let generator = AVAssetImageGenerator(asset: avAsset)
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 512, height: 512)
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.05, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
+        generator.maximumSize = CGSize(width: 256, height: 256)
+        let step = timestamps.count > 1 ? (timestamps.last! - timestamps.first!) / Double(timestamps.count) : 2.0
+        let tolSec = min(0.8, max(0.08, step * 0.4))
+        let tolerance = CMTime(seconds: tolSec, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
 
         let cmTimes = timestamps.map { CMTime(seconds: $0, preferredTimescale: 600) }
         var frames: [(position: Double, ts: Double, image: CGImage)] = []

@@ -93,6 +93,8 @@ public final class MatchEngine: Sendable {
         if ratio < Double(config.durationRatioMin),
            FileManager.default.fileExists(atPath: assetA.path.path),
            FileManager.default.fileExists(atPath: assetB.path.path) {
+            // Skip deep 32-frame decode if coarse dHash indicates completely unrelated content
+            guard coarseScore >= config.coarseRejectThreshold else { return nil }
             do {
                 assetA.fingerprints = try await deepCache.fingerprints(for: assetA)
                 assetB.fingerprints = try await deepCache.fingerprints(for: assetB)
