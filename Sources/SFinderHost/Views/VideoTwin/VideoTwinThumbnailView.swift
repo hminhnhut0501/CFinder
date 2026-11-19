@@ -12,6 +12,10 @@ public actor VideoTwinThumbnailCache {
     private var cachedBytes = 0
     private let memoryBudget = 24 * 1024 * 1024 // 24MB
     
+    private var activeGenerations = 0
+    private let maxConcurrentGenerations = 4
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    
     public init() {}
     
     public func image(for url: URL, time: Double = 1.0) async -> CGImage? {
@@ -23,18 +27,24 @@ public actor VideoTwinThumbnailCache {
             return await running.value
         }
         
-        let task = Task<CGImage?, Never> {
-            let asset = AVURLAsset(url: url)
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 160, height: 100) // Optimal 2x Retina for ~72x46 display, 4x faster and lighter
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+        let task = Task<CGImage?, Never> { [weak self] in
+            guard let self else { return nil }
+            await self.acquireSlot()
+            defer { Task { await self.releaseSlot() } }
             
-            guard let result = try? await generator.image(at: CMTime(seconds: max(0, time), preferredTimescale: 600)) else {
-                return nil
+            return autoreleasepool { () -> CGImage? in
+                let asset = AVURLAsset(url: url)
+                let generator = AVAssetImageGenerator(asset: asset)
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 160, height: 100) // Optimal 2x Retina for ~72x46 display, 4x faster and lighter
+                generator.requestedTimeToleranceBefore = CMTime(seconds: 0.5, preferredTimescale: 600)
+                generator.requestedTimeToleranceAfter = CMTime(seconds: 0.5, preferredTimescale: 600)
+                
+                guard let result = try? generator.copyCGImage(at: CMTime(seconds: max(0, time), preferredTimescale: 600), actualTime: nil) else {
+                    return nil
+                }
+                return result
             }
-            return result.image
         }
         
         inFlight[key] = task
@@ -57,6 +67,25 @@ public actor VideoTwinThumbnailCache {
         }
         
         return cgImage
+    }
+    
+    private func acquireSlot() async {
+        if activeGenerations < maxConcurrentGenerations {
+            activeGenerations += 1
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+    
+    private func releaseSlot() {
+        if !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            next.resume()
+        } else {
+            activeGenerations = max(0, activeGenerations - 1)
+        }
     }
     
     public func clear() {

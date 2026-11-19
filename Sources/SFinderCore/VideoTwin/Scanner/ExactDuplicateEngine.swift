@@ -178,8 +178,12 @@ public actor ExactDuplicateEngine {
 
         while true {
             try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: bufferSize), !chunk.isEmpty else { break }
-            hasher.update(data: chunk)
+            let hasMore = autoreleasepool { () -> Bool in
+                guard let chunk = try? handle.read(upToCount: bufferSize), !chunk.isEmpty else { return false }
+                hasher.update(data: chunk)
+                return true
+            }
+            if !hasMore { break }
         }
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()

@@ -248,42 +248,84 @@ public final class FolderScanner: ObservableObject {
             }
         }
 
+        // Map exact duplicate followers to avoid redundant video decoding
+        var exactLeaderMap: [UUID: UUID] = [:] // followerID -> leaderID
+        var leaderIDs = Set<UUID>()
+        for group in exactGroups {
+            guard let leader = group.assets.first else { continue }
+            leaderIDs.insert(leader.id)
+            for asset in group.assets where asset.id != leader.id {
+                exactLeaderMap[asset.id] = leader.id
+            }
+        }
+
         await setPhase(.analyzing)
         var analyzedAssets: [VideoAsset] = []
         var start = 0
         var analyzedCount = 0, failedCount = 0
         var lastAnalysisUpdate = Date.distantPast
+
+        // Assets that actually need visual decoding (skip followers in exact groups)
+        let assetsToAnalyze = newAssets.filter { exactLeaderMap[$0.id] == nil }
+        var leaderAnalysisMap: [UUID: VideoAsset] = [:]
+
         // Recheck thermal limits between batches.
-        while start < newAssets.count {
+        while start < assetsToAnalyze.count {
             let concurrency = min(4, max(1, await resourceController.recommendedDecodeWorkers()))
             try Task.checkCancellation()
             await pauseToken.checkPause()
             try Task.checkCancellation()
-            let batch = Array(newAssets[start..<min(start + concurrency, newAssets.count)])
-            let results = try await withThrowingTaskGroup(of: VideoAsset.self, returning: [VideoAsset].self) { group in
-                for asset in batch { group.addTask { try await VideoAnalyzer().analyze(asset) } }
+            let batch = Array(assetsToAnalyze[start..<min(start + concurrency, assetsToAnalyze.count)])
+            let results = await withTaskGroup(of: VideoAsset.self, returning: [VideoAsset].self) { group in
+                for asset in batch {
+                    group.addTask {
+                        await VideoAnalyzer().analyze(asset)
+                    }
+                }
                 var results: [VideoAsset] = []
-                for try await asset in group { results.append(asset) }
+                for await asset in group {
+                    results.append(asset)
+                }
                 return results
             }
             for asset in results {
                 if currentScanIDs.contains(asset.id) {
-                    if !reusableIDs.contains(asset.id) { try await storage.saveAnalysis(asset) }
+                    if !reusableIDs.contains(asset.id) { try? await storage.saveAnalysis(asset) }
                     analyzedCount += 1
                     if asset.analysisState == .failed { failedCount += 1 }
+                }
+                if leaderIDs.contains(asset.id) {
+                    leaderAnalysisMap[asset.id] = asset
                 }
                 analyzedAssets.append(asset)
             }
             start += batch.count
-            if Date().timeIntervalSince(lastAnalysisUpdate) >= 0.1 || start == newAssets.count {
+            if Date().timeIntervalSince(lastAnalysisUpdate) >= 0.25 || start == assetsToAnalyze.count {
                 lastAnalysisUpdate = Date()
                 let count = analyzedCount, failed = failedCount
                 await MainActor.run {
                     self.session.progress.totalAnalyzed = count
                     self.session.progress.failedFiles = failed
-                    self.activity = "Analyzed \(count) scanned files"
+                    self.activity = "Analyzed \(count)/\(assetsToAnalyze.count) files"
                     self.lastActivityAt = Date()
                 }
+            }
+        }
+
+        // For exact duplicate followers: clone analysis from their leader
+        for asset in newAssets where exactLeaderMap[asset.id] != nil {
+            var follower = asset
+            if let leaderID = exactLeaderMap[asset.id], let leaderAsset = leaderAnalysisMap[leaderID] {
+                follower.metadata = leaderAsset.metadata
+                follower.audioMetadata = leaderAsset.audioMetadata
+                follower.fingerprints = leaderAsset.fingerprints
+                follower.quality = leaderAsset.quality
+                follower.analysisState = leaderAsset.analysisState
+                follower.errorState = leaderAsset.errorState
+            }
+            analyzedAssets.append(follower)
+            if currentScanIDs.contains(follower.id) && !reusableIDs.contains(follower.id) {
+                try? await storage.saveAnalysis(follower)
             }
         }
         let scannedIDs = currentScanIDs
@@ -376,21 +418,29 @@ public final class FolderScanner: ObservableObject {
         let watermarkAnalyzer = WatermarkAnalyzer()
         let dismissedWatermarks = await MainActor.run { Set(UserDefaults.standard.stringArray(forKey: "dismissedWatermarkFiles") ?? []) }
         for id in byID.keys { byID[id]?.watermark = nil }
-        for match in matches where match.matchType != .exact {
+        // Limit watermark overlay examination to at most 60 near-duplicate candidate pairs to prevent Vision OOM
+        let nonExactMatches = matches.filter { $0.matchType != .exact }
+        let matchesToExamine = Array(nonExactMatches.prefix(60))
+
+        for match in matchesToExamine {
             try Task.checkCancellation()
             await pauseToken.checkPause()
             guard let a = byID[match.assetAID], let b = byID[match.assetBID] else { continue }
             let overlayName = Self.truncateFilename(a.path.lastPathComponent, maxLen: 18)
             await MainActor.run { self.activity = "Kiểm tra chi tiết: \(overlayName)"; self.lastActivityAt = Date() }
-            if let (assessmentA, assessmentB) = try await watermarkAnalyzer.analyze(a, b, match: match) {
-                for (asset, raw) in [(a, assessmentA), (b, assessmentB)] {
-                    var assessment = raw
-                    assessment.dismissed = dismissedWatermarks.contains(WatermarkPolicy.dismissalKey(asset))
-                    let rank: [WatermarkAssessment.Status: Int] = [.unavailable: 0, .noEvidence: 1, .possible: 2, .detected: 3]
-                    if (rank[assessment.status] ?? 0) >= (rank[byID[asset.id]?.watermark?.status ?? .unavailable] ?? 0) {
-                        byID[asset.id]?.watermark = assessment
+            do {
+                if let (assessmentA, assessmentB) = try await watermarkAnalyzer.analyze(a, b, match: match) {
+                    for (asset, raw) in [(a, assessmentA), (b, assessmentB)] {
+                        var assessment = raw
+                        assessment.dismissed = dismissedWatermarks.contains(WatermarkPolicy.dismissalKey(asset))
+                        let rank: [WatermarkAssessment.Status: Int] = [.unavailable: 0, .noEvidence: 1, .possible: 2, .detected: 3]
+                        if (rank[assessment.status] ?? 0) >= (rank[byID[asset.id]?.watermark?.status ?? .unavailable] ?? 0) {
+                            byID[asset.id]?.watermark = assessment
+                        }
                     }
                 }
+            } catch {
+                logger.warning("Watermark analysis skipped for pair: \(error)")
             }
         }
         for asset in byID.values { try await storage.saveAnalysis(asset) }

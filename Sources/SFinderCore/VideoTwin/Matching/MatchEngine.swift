@@ -5,7 +5,9 @@ import OSLog
 /// Thread-safe deduplicated cache for deep-level frame fingerprints within a scan session.
 private actor DeepFingerprintCache {
     private var cache: [UUID: [FrameSample]] = [:]
+    private var order: [UUID] = []
     private var inFlight: [UUID: Task<[FrameSample], Error>] = [:]
+    private let maxCacheEntries = 64
 
     func fingerprints(for asset: VideoAsset) async throws -> [FrameSample] {
         if let cached = cache[asset.id] {
@@ -21,6 +23,11 @@ private actor DeepFingerprintCache {
         do {
             let result = try await task.value
             cache[asset.id] = result
+            order.append(asset.id)
+            while order.count > maxCacheEntries {
+                let evictID = order.removeFirst()
+                cache.removeValue(forKey: evictID)
+            }
             inFlight[asset.id] = nil
             return result
         } catch {

@@ -147,14 +147,16 @@ public actor FrameSampler {
 
         let cancellation = ImageGeneratorCancellation(generator)
         await withTaskCancellationHandler {
-        for await result in generator.images(for: cmTimes) {
-            if Task.isCancelled { generator.cancelAllCGImageGeneration(); break }
-            do {
-                let reqSec = result.requestedTime.seconds
-                let idx = cmTimes.indices.min(by: { abs(cmTimes[$0].seconds - reqSec) < abs(cmTimes[$1].seconds - reqSec) }) ?? 0
-                frames.append((positions[idx], try result.actualTime.seconds, try result.image))
-            } catch { logger.debug("Failed to get frame: \(error)") }
-        }
+            for await result in generator.images(for: cmTimes) {
+                if Task.isCancelled { generator.cancelAllCGImageGeneration(); break }
+                autoreleasepool {
+                    do {
+                        let reqSec = result.requestedTime.seconds
+                        let idx = cmTimes.indices.min(by: { abs(cmTimes[$0].seconds - reqSec) < abs(cmTimes[$1].seconds - reqSec) }) ?? 0
+                        frames.append((positions[idx], try result.actualTime.seconds, try result.image))
+                    } catch { logger.debug("Failed to get frame: \(error)") }
+                }
+            }
         } onCancel: { cancellation.cancel() }
 
         frames.sort { $0.position < $1.position }
@@ -175,17 +177,19 @@ extension FrameSampler {
     /// Returns true if frame should be rejected (mostly black, white, or low entropy).
     /// Used for scene-aware sampling (spec §15).
     public static func isLowQualityFrame(_ image: CGImage, threshold: Double = 0.05) -> Bool {
-        let size = 32
-        var pixels = [UInt8](repeating: 0, count: size * size)
-        let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
-            guard let context = CGContext(data: bytes.baseAddress, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
-            return true
+        autoreleasepool {
+            let size = 32
+            var pixels = [UInt8](repeating: 0, count: size * size)
+            let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
+                guard let context = CGContext(data: bytes.baseAddress, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))
+                return true
+            }
+            guard drawn else { return true }
+            let mean = pixels.reduce(0.0) { $0 + Double($1) } / Double(pixels.count)
+            let variance = pixels.reduce(0.0) { $0 + pow(Double($1) - mean, 2) } / Double(pixels.count)
+            return variance < pow(max(2, threshold * 255), 2)
         }
-        guard drawn else { return true }
-        let mean = pixels.reduce(0.0) { $0 + Double($1) } / Double(pixels.count)
-        let variance = pixels.reduce(0.0) { $0 + pow(Double($1) - mean, 2) } / Double(pixels.count)
-        return variance < pow(max(2, threshold * 255), 2)
     }
 }
 

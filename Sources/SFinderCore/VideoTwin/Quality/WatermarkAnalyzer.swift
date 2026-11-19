@@ -56,17 +56,19 @@ public actor WatermarkAnalyzer {
     private func frames(_ url: URL, times: [Double]) async throws -> [Int: Frame] {
         let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
         generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 960, height: 960)
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        generator.maximumSize = CGSize(width: 480, height: 320)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 0.05, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 0.05, preferredTimescale: 600)
         let cancellation = WatermarkDecodeCancellation(generator)
         var frames: [Int: Frame] = [:]
         try await withTaskCancellationHandler {
             for await result in generator.images(for: times.map { CMTime(seconds: $0, preferredTimescale: 600) }) {
                 try Task.checkCancellation()
-                guard let index = times.indices.min(by: { abs(times[$0] - result.requestedTime.seconds) < abs(times[$1] - result.requestedTime.seconds) }) else { continue }
-                if let image = try? result.image, let time = try? result.actualTime.seconds {
-                    frames[index] = try? Self.frame(image, time: time)
+                autoreleasepool {
+                    guard let index = times.indices.min(by: { abs(times[$0] - result.requestedTime.seconds) < abs(times[$1] - result.requestedTime.seconds) }) else { return }
+                    if let image = try? result.image, let time = try? result.actualTime.seconds {
+                        frames[index] = try? Self.frame(image, time: time)
+                    }
                 }
             }
         } onCancel: { cancellation.cancel() }
@@ -75,23 +77,25 @@ public actor WatermarkAnalyzer {
     }
 
     static func frame(_ image: CGImage, time: Double) throws -> Frame {
-        var pixels = [UInt8](repeating: 0, count: width * height)
-        let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
-            guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
+        try autoreleasepool {
+            var pixels = [UInt8](repeating: 0, count: width * height)
+            let drawn = pixels.withUnsafeMutableBytes { bytes -> Bool in
+                guard let context = CGContext(data: bytes.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue) else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+                return true
+            }
+            guard drawn else { throw CocoaError(.coderInvalidValue) }
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .fast
+            request.usesLanguageCorrection = false
+            try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            let texts = (request.results ?? []).compactMap { observation -> TextBox? in
+                guard let candidate = observation.topCandidates(1).first else { return nil }
+                let rect = observation.boundingBox
+                return TextBox(text: candidate.string, region: WatermarkRegion(x: rect.minX, y: 1 - rect.maxY, width: rect.width, height: rect.height), confidence: candidate.confidence)
+            }
+            return Frame(time: time, pixels: pixels, texts: texts)
         }
-        guard drawn else { throw CocoaError(.coderInvalidValue) }
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
-        let texts = (request.results ?? []).compactMap { observation -> TextBox? in
-            guard let candidate = observation.topCandidates(1).first else { return nil }
-            let rect = observation.boundingBox
-            return TextBox(text: candidate.string, region: WatermarkRegion(x: rect.minX, y: 1 - rect.maxY, width: rect.width, height: rect.height), confidence: candidate.confidence)
-        }
-        return Frame(time: time, pixels: pixels, texts: texts)
     }
 
     static func assess(_ frames: [Frame], against peers: [Frame], peer: UUID, comparable: Bool) -> WatermarkAssessment {

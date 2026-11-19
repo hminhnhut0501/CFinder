@@ -14,7 +14,7 @@ import OSLog
 ///     → HDR normalization (tone map if needed)
 ///     → resize to target width (preserving aspect ratio)
 ///     → luminance normalization
-public actor FrameNormalizer {
+public struct FrameNormalizer: Sendable {
     private let logger = Logger(subsystem: "com.sfinder.videotwin", category: "fingerprint")
 
     // MARK: - Configuration
@@ -50,60 +50,62 @@ public actor FrameNormalizer {
     }
 
     func normalize(_ cgImage: CGImage, rotation: Double = 0, isHDR: Bool = false) -> NormalizedFrame {
-        var image = cgImage
-        var wasRotated = false
-        var cropRect: CGRect? = nil
-        var wasHDRToneMapped = false
+        autoreleasepool {
+            var image = cgImage
+            var wasRotated = false
+            var cropRect: CGRect? = nil
+            var wasHDRToneMapped = false
 
-        // 1. Rotation normalization (avoid duplicate rotation from AVFoundation)
-        //    AVAssetImageGenerator applies preferredTransform, so usually rotation = 0 here.
-        //    Handle residual rotation if needed.
-        let rot = rotation.truncatingRemainder(dividingBy: 360)
-        if abs(rot) > 1.0 {
-            if let rotated = applyRotation(image, degrees: rot) {
-                image = rotated
-                wasRotated = true
+            // 1. Rotation normalization (avoid duplicate rotation from AVFoundation)
+            //    AVAssetImageGenerator applies preferredTransform, so usually rotation = 0 here.
+            //    Handle residual rotation if needed.
+            let rot = rotation.truncatingRemainder(dividingBy: 360)
+            if abs(rot) > 1.0 {
+                if let rotated = applyRotation(image, degrees: rot) {
+                    image = rotated
+                    wasRotated = true
+                }
             }
-        }
 
-        // 2. Black-bar detection and safe crop
-        let detected = detectBlackBars(image)
-        if let cropR = detected {
-            if let cropped = cropImage(image, to: cropR) {
-                image = cropped
-                cropRect = cropR
+            // 2. Black-bar detection and safe crop
+            let detected = detectBlackBars(image)
+            if let cropR = detected {
+                if let cropped = cropImage(image, to: cropR) {
+                    image = cropped
+                    cropRect = cropR
+                }
             }
-        }
 
-        // 3. HDR normalization: simple tone mapping for HDR content
-        if isHDR {
-            if let toned = toneMapHDR(image) {
-                image = toned
-                wasHDRToneMapped = true
+            // 3. HDR normalization: simple tone mapping for HDR content
+            if isHDR {
+                if let toned = toneMapHDR(image) {
+                    image = toned
+                    wasHDRToneMapped = true
+                }
             }
-        }
 
-        // 4. Color normalization: convert to sRGB
-        if let normalized = normalizeColorSpace(image) {
-            image = normalized
-        }
+            // 4. Color normalization: convert to sRGB
+            if let normalized = normalizeColorSpace(image) {
+                image = normalized
+            }
 
-        // 5. Resize to target width
-        if let resized = resize(image, targetWidth: config.targetWidth) {
-            image = resized
-        }
+            // 5. Resize to target width
+            if let resized = resize(image, targetWidth: config.targetWidth) {
+                image = resized
+            }
 
-        // 6. Luminance normalization (CLAHE-lite via histogram stretch)
-        if let lumNorm = normalizeLuminance(image) {
-            image = lumNorm
-        }
+            // 6. Luminance normalization (CLAHE-lite via histogram stretch)
+            if let lumNorm = normalizeLuminance(image) {
+                image = lumNorm
+            }
 
-        return NormalizedFrame(
-            image: image,
-            cropRect: cropRect,
-            wasRotated: wasRotated,
-            wasHDRToneMapped: wasHDRToneMapped
-        )
+            return NormalizedFrame(
+                image: image,
+                cropRect: cropRect,
+                wasRotated: wasRotated,
+                wasHDRToneMapped: wasHDRToneMapped
+            )
+        }
     }
 
     // MARK: - Black-bar detection (spec §18)
