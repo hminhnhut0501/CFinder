@@ -135,12 +135,43 @@ public struct VideoComparatorView: View {
         )
     }
     
+    // MARK: - Diff Calculations
+    
+    private var maxPixels: Int {
+        reports.map { ($0.primaryVideo?.displayWidth ?? 0) * ($0.primaryVideo?.displayHeight ?? 0) }.max() ?? 0
+    }
+    private var hasDiffPixels: Bool {
+        Set(reports.map { ($0.primaryVideo?.displayWidth ?? 0) * ($0.primaryVideo?.displayHeight ?? 0) }).count > 1
+    }
+    
+    private var maxBitrate: Int64 {
+        reports.map { $0.primaryVideo?.bitrate ?? ($0.durationSeconds > 0 ? Int64(Double($0.fileSize * 8) / $0.durationSeconds) : 0) }.max() ?? 0
+    }
+    private var hasDiffBitrate: Bool {
+        Set(reports.map { $0.primaryVideo?.bitrate ?? ($0.durationSeconds > 0 ? Int64(Double($0.fileSize * 8) / $0.durationSeconds) : 0) }.filter { $0 > 0 }).count > 1
+    }
+    
+    private var maxFPS: Double {
+        reports.map { $0.primaryVideo?.fps ?? 0 }.max() ?? 0
+    }
+    private var hasDiffFPS: Bool {
+        Set(reports.map { Int(($0.primaryVideo?.fps ?? 0) * 10) }).count > 1
+    }
+    
     // MARK: - Video Column Card
     
     private func videoColumnCard(report: VideoDetailedReport, isWinner: Bool) -> some View {
         let v = report.primaryVideo
         let a = report.primaryAudio
         let score = report.score
+        
+        let pixels = (v?.displayWidth ?? 0) * (v?.displayHeight ?? 0)
+        let isBestRes = hasDiffPixels && pixels == maxPixels && pixels > 0
+        let bVal = (v?.bitrate ?? 0) > 0 ? (v?.bitrate ?? 0) : (report.durationSeconds > 0 ? Int64(Double(report.fileSize * 8) / report.durationSeconds) : 0)
+        let isBestBitrate = hasDiffBitrate && bVal == maxBitrate && bVal > 0
+        let isBestFPS = hasDiffFPS && (v?.fps ?? 0) == maxFPS && maxFPS > 0
+        let isModernCodec = (v?.humanCodec.contains("HEVC") == true || v?.humanCodec.contains("AV1") == true)
+        let isHDR = (v?.isHDR == true || (v?.bitDepth ?? 8) > 8)
         
         return VStack(alignment: .leading, spacing: 10) {
             // Header / Winner Ribbon
@@ -226,15 +257,15 @@ public struct VideoComparatorView: View {
             
             Divider().background(CFinderTheme.cardBorder)
             
-            // Metric Rows
+            // Metric Rows with Highlight
             VStack(spacing: 6) {
                 metricRow(title: "Thời lượng", value: formatDuration(report.durationSeconds))
                 metricRow(title: "Mật độ Bitrate (BPPF)", value: String(format: "%.3f bppf", score.bitsPerPixelFrame), badge: score.bppfHealth.rawValue, badgeColor: Color(hex: score.bppfHealth.badgeColorHex))
-                metricRow(title: "Độ phân giải", value: v.map { "\($0.displayWidth)×\($0.displayHeight)" } ?? "—")
-                metricRow(title: "Codec video", value: v?.humanCodec ?? "—")
-                metricRow(title: "Bitrate hình", value: v.map { formatBitrate($0.bitrate) } ?? "—")
-                metricRow(title: "Khung hình (FPS)", value: v.map { String(format: "%.1f fps", $0.fps) } ?? "—")
-                metricRow(title: "Màu & HDR", value: v.map { "\($0.bitDepth)-bit \($0.isHDR ? "HDR" : "SDR")" } ?? "—")
+                metricRow(title: "Độ phân giải", value: v.map { "\($0.displayWidth)×\($0.displayHeight)" } ?? "—", isBest: isBestRes)
+                metricRow(title: "Codec video", value: v?.humanCodec ?? "—", isBest: isModernCodec)
+                metricRow(title: "Bitrate hình", value: formatBitrate(bVal), isBest: isBestBitrate)
+                metricRow(title: "Khung hình (FPS)", value: v.map { String(format: "%.1f fps", $0.fps) } ?? "—", isBest: isBestFPS)
+                metricRow(title: "Màu & HDR", value: v.map { "\($0.bitDepth)-bit \($0.isHDR ? "HDR" : "SDR")" } ?? "—", isBest: isHDR)
                 metricRow(title: "Âm thanh", value: a.map { "\($0.humanCodec) • \($0.channelLayout)" } ?? "—")
             }
             
@@ -297,7 +328,7 @@ public struct VideoComparatorView: View {
         )
     }
     
-    private func metricRow(title: String, value: String, badge: String? = nil, badgeColor: Color = .gray) -> some View {
+    private func metricRow(title: String, value: String, isBest: Bool = false, badge: String? = nil, badgeColor: Color = .gray) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(.system(size: 9))
@@ -305,8 +336,8 @@ public struct VideoComparatorView: View {
             
             HStack(spacing: 6) {
                 Text(value)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(CFinderTheme.textPrimary)
+                    .font(.system(size: 11, weight: isBest ? .bold : .semibold))
+                    .foregroundStyle(isBest ? CFinderTheme.success : CFinderTheme.textPrimary)
                     .lineLimit(1)
                 
                 if let b = badge {
@@ -323,8 +354,11 @@ public struct VideoComparatorView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.03))
+        .background(isBest ? CFinderTheme.success.opacity(0.12) : Color.white.opacity(0.03))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(
+            isBest ? RoundedRectangle(cornerRadius: 4).stroke(CFinderTheme.success.opacity(0.3), lineWidth: 0.8) : nil
+        )
     }
     
     private func formatBitrate(_ bps: Int64) -> String {

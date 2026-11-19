@@ -25,7 +25,14 @@ public actor QualityAnalyzer {
         let width = vs?.width ?? 0
         let height = vs?.height ?? 0
         let fps = vs?.nominalFPS ?? 30.0
-        let bitrate = vs?.bitrate
+        
+        // Effective bitrate with fallback from file size & duration
+        var bitrate = vs?.bitrate
+        if (bitrate == nil || bitrate == 0), meta.fileSize > 0, meta.durationSeconds > 0 {
+            let totalBps = Int64(Double(meta.fileSize * 8) / max(0.1, meta.durationSeconds))
+            let audioBps = meta.audioStream?.bitrate ?? 128_000
+            bitrate = max(100_000, totalBps - audioBps)
+        }
 
         let pixels = Float(width * height)
         var bpp: Double? = nil
@@ -34,16 +41,17 @@ public actor QualityAnalyzer {
         }
 
         let resScore = calculateResolutionScore(vs)
-        let (bitrateScore, codecScore) = calculateBitrateAndCodecScore(vs, container: meta.container)
+        let (bitrateScore, codecScore) = calculateBitrateAndCodecScore(vs, container: meta.container, effectiveBitrate: bitrate)
         let audioScore = calculateAudioScore(meta.audioStream)
 
-        let rawScore = (resScore * 0.4) + (codecScore * 0.2) + (bitrateScore * 0.3) + (audioScore * 0.1)
+        // Quality First: Resolution dominates at 50%, Bitrate 25%, Codec 15%, Audio 10%
+        let rawScore = (resScore * 0.50) + (bitrateScore * 0.25) + (codecScore * 0.15) + (audioScore * 0.10)
 
-        let upscaleSuspicion = detectUpscaleSuspicion(vs)
+        let upscaleSuspicion = detectUpscaleSuspicion(vs, effectiveBitrate: bitrate)
         let sharpnessValues = asset.fingerprints.compactMap(\.sharpness).sorted()
         let sharpness = sharpnessValues.isEmpty ? nil : sharpnessValues[sharpnessValues.count / 2]
         let measuredScore = sharpness.map { rawScore * 0.9 + $0 * 0.1 } ?? rawScore
-        let finalScore = (upscaleSuspicion != .none) ? measuredScore * 0.6 : measuredScore
+        let finalScore = (upscaleSuspicion == .likely) ? measuredScore * 0.88 : measuredScore
 
         var reasons: [QualityReason] = []
         if upscaleSuspicion == .likely {
@@ -82,16 +90,36 @@ public actor QualityAnalyzer {
 
     private func calculateResolutionScore(_ video: VideoStreamMetadata?) -> Float {
         guard let v = video, v.width > 0, v.height > 0 else { return 0 }
-        let pixels = Float(v.width * v.height)
-        let refPixels: Float = 8_294_400
-        var score = min(1.0, pixels / refPixels)
-        if v.isHDR || (v.bitDepth ?? 8) > 8 { score = min(1.0, score * 1.1) }
-        return score
+        let w = max(v.displayWidth, v.width)
+        let h = max(v.displayHeight, v.height)
+        let pixels = Float(w * h)
+        
+        // Tiered resolution scoring reflecting real-world human perception
+        let score: Float
+        if pixels >= 8_000_000 {        // 4K UHD (3840×2160 = 8.29M)
+            score = 1.00
+        } else if pixels >= 3_500_000 {  // 1440p QHD (2560×1440 = 3.68M)
+            score = 0.88
+        } else if pixels >= 1_900_000 {  // 1080p FHD (1920×1080 = 2.07M)
+            score = 0.78
+        } else if pixels >= 900_000 {   // 720p HD (1280×720 = 0.92M)
+            score = 0.50
+        } else if pixels >= 380_000 {   // 480p SD (854×480 = 0.41M)
+            score = 0.30
+        } else {
+            score = max(0.10, pixels / 1_500_000)
+        }
+        
+        var adjusted = score
+        if v.isHDR || (v.bitDepth ?? 8) > 8 {
+            adjusted = min(1.0, adjusted * 1.08)
+        }
+        return adjusted
     }
 
-    private func calculateBitrateAndCodecScore(_ video: VideoStreamMetadata?, container: String) -> (Float, Float) {
+    private func calculateBitrateAndCodecScore(_ video: VideoStreamMetadata?, container: String, effectiveBitrate: Int64?) -> (Float, Float) {
         let codecStr = video?.codec.lowercased() ?? "unknown"
-        let bitrate = Float(video?.bitrate ?? 0)
+        let bitrate = Float(effectiveBitrate ?? video?.bitrate ?? 0)
 
         let codecScore: Float
         let refBitrate: Float
@@ -99,13 +127,13 @@ public actor QualityAnalyzer {
         if codecStr.contains("hevc") || codecStr.contains("h265") || codecStr.contains("hvc1") {
             codecScore = 1.0; refBitrate = 15_000_000
         } else if codecStr.contains("vp9") || codecStr.contains("av1") {
-            codecScore = 0.9; refBitrate = 15_000_000
+            codecScore = 0.95; refBitrate = 15_000_000
         } else if codecStr.contains("h264") || codecStr.contains("avc") {
-            codecScore = 0.8; refBitrate = 25_000_000
+            codecScore = 0.80; refBitrate = 25_000_000
         } else {
-            codecScore = 0.5; refBitrate = 30_000_000
+            codecScore = 0.50; refBitrate = 30_000_000
         }
-        let bScore = bitrate > 0 ? min(1.0, bitrate / refBitrate) : 0.5
+        let bScore = bitrate > 0 ? min(1.0, max(0.2, bitrate / refBitrate)) : 0.5
         return (bScore, codecScore)
     }
 
@@ -118,14 +146,18 @@ public actor QualityAnalyzer {
         return (channelScore * 0.4) + (bScore * 0.6)
     }
 
-    private func detectUpscaleSuspicion(_ video: VideoStreamMetadata?) -> UpscaleSuspicion {
+    private func detectUpscaleSuspicion(_ video: VideoStreamMetadata?, effectiveBitrate: Int64?) -> UpscaleSuspicion {
         guard let v = video, v.width > 0, v.height > 0 else { return .none }
-        let pixels = Float(v.width * v.height)
-        if let bitrate = v.bitrate, bitrate > 0 {
-            let bpp = Float(bitrate) / (pixels * Float(max(1, v.nominalFPS)))
-            if bpp < 0.01 { return .likely }
+        let pixels = Float(max(v.displayWidth, v.width) * max(v.displayHeight, v.height))
+        // Only inspect if high resolution (1080p+) and bitrate is severely starved beyond reasonable limits
+        if pixels >= 1_900_000, let bitrate = effectiveBitrate, bitrate > 0 {
+            let fps = Float(max(1.0, v.nominalFPS))
+            let bpp = Float(bitrate) / (pixels * fps)
+            let codecStr = v.codec.lowercased()
+            let isModern = codecStr.contains("hevc") || codecStr.contains("h265") || codecStr.contains("av1") || codecStr.contains("vp9")
+            let threshold: Float = isModern ? 0.003 : 0.005
+            if bpp < threshold { return .likely }
         }
-        if v.width % 2 != 0 || v.height % 2 != 0 { return .possible }
         return .none
     }
 }

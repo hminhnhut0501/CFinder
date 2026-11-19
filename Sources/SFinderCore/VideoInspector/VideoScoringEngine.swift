@@ -185,14 +185,14 @@ public struct VideoScoringEngine: Sendable {
             }
         }
         
-        // 7. Overall Score Composite
+        // 7. Overall Score Composite (Quality First: Visual 60%, Efficiency 25%, Audio 15%)
         let visualNorm = min(100.0, max(0.0, visualScore * 1.8))
         let effNorm = min(100.0, max(0.0, efficiencyScore))
         let audioNorm = min(100.0, max(0.0, audioScore))
         
-        var composite = (visualNorm * 0.45) + (effNorm * 0.35) + (audioNorm * 0.20)
+        var composite = (visualNorm * 0.60) + (effNorm * 0.25) + (audioNorm * 0.15)
         if isBloatedBitrate {
-            composite = max(20.0, composite - bloatPenalty * 0.5)
+            composite = max(20.0, composite - bloatPenalty * 0.3)
         }
         let finalOverall = min(100.0, max(0.0, composite))
         
@@ -229,8 +229,21 @@ public struct VideoScoringEngine: Sendable {
     public func compareVideos(reports: [VideoDetailedReport]) -> ComparisonVerdict? {
         guard reports.count >= 2 else { return nil }
         
-        // Sort descending by overall score
-        let sorted = reports.sorted { $0.score.overallScore > $1.score.overallScore }
+        // Sort with Resolution Dominance (Tier 1), then overall score
+        let sorted = reports.sorted { a, b in
+            let pixA = (a.primaryVideo?.displayWidth ?? 0) * (a.primaryVideo?.displayHeight ?? 0)
+            let pixB = (b.primaryVideo?.displayWidth ?? 0) * (b.primaryVideo?.displayHeight ?? 0)
+            
+            // If one has significantly higher resolution (>= 15% more pixels) and comparable duration
+            if pixA > 0 && pixB > 0 && Double(max(pixA, pixB)) >= Double(min(pixA, pixB)) * 1.15 {
+                let durA = a.durationSeconds
+                let durB = b.durationSeconds
+                let maxDur = max(durA, durB)
+                if pixA > pixB && durA >= maxDur * 0.90 { return true }
+                if pixB > pixA && durB >= maxDur * 0.90 { return false }
+            }
+            return a.score.overallScore > b.score.overallScore
+        }
         guard let winner = sorted.first else { return nil }
         let runnerUp = sorted[1]
         

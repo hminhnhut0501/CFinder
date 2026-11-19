@@ -34,8 +34,15 @@ private struct ClusterParamDiff {
         resolutionDiffers = Set(pixels).count > 1
         maxPixels = pixels.max() ?? 0
         
-        let bitrates = assets.map { $0.metadata?.videoStream?.bitrate ?? 0 }
-        bitrateDiffers = Set(bitrates).count > 1
+        let bitrates = assets.map { a -> Int64 in
+            if let b = a.metadata?.videoStream?.bitrate, b > 0 { return b }
+            let dur = a.metadata?.durationSeconds ?? 0
+            if dur > 0, a.fileIdentity.fileSize > 0 {
+                return Int64(Double(a.fileIdentity.fileSize * 8) / dur)
+            }
+            return 0
+        }
+        bitrateDiffers = Set(bitrates.filter { $0 > 0 }).count > 1
         maxBitrate = bitrates.max() ?? 0
         
         let codecs = assets.map { $0.metadata?.videoStream?.codec.lowercased() ?? "" }
@@ -207,11 +214,12 @@ public struct VideoTwinClusterGroupCard: View {
         let resolution = (width > 0 && height > 0) ? "\(width)×\(height)" : "—"
         let fileSize = asset.fileIdentity.fileSize
         let fileSizeStr = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
-        let bitrateVal = stream?.bitrate ?? 0
-        let bitrateStr = bitrateVal > 0 ? String(format: "%.1f Mbps", Double(bitrateVal) / 1_000_000.0) : "—"
-        let codec = formatCodec(stream)
         let durationSec = asset.metadata?.durationSeconds ?? 0
         let durationStr = formatDuration(durationSec)
+        let rawBitrate = stream?.bitrate ?? 0
+        let effBitrate: Int64 = (rawBitrate > 0) ? rawBitrate : (durationSec > 0 && fileSize > 0 ? Int64(Double(fileSize * 8) / durationSec) : 0)
+        let bitrateStr = effBitrate > 0 ? String(format: "%.1f Mbps", Double(effBitrate) / 1_000_000.0) : "—"
+        let codec = formatCodec(stream)
         
         return HStack(spacing: 12) {
             // Thumbnail with QuickView on click
@@ -271,18 +279,13 @@ public struct VideoTwinClusterGroupCard: View {
                     }
                 }
                 
-                // Line 2: Specs with smart diffing (highlighting only superior specs)
+                // Line 2: Specs with smart diffing (highlighting only superior specs without clutter text)
                 HStack(spacing: 6) {
-                    // Resolution
-                    if diff.resolutionDiffers && pixels == diff.maxPixels && pixels > 0 {
-                        Text("\(resolution) (Nét hơn)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(CFinderTheme.primaryLight)
-                    } else {
-                        Text(resolution)
-                            .font(.system(size: 10))
-                            .foregroundStyle(CFinderTheme.textMuted)
-                    }
+                    // Resolution: Highlight if highest resolution in cluster
+                    let isBestRes = diff.resolutionDiffers && pixels == diff.maxPixels && pixels > 0
+                    Text(resolution)
+                        .font(.system(size: 10, weight: isBestRes ? .bold : .regular))
+                        .foregroundStyle(isBestRes ? CFinderTheme.success : CFinderTheme.textMuted)
                     
                     Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     
@@ -294,36 +297,27 @@ public struct VideoTwinClusterGroupCard: View {
                         Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     }
                     
-                    // File Size
-                    if diff.sizeDiffers && fileSize == diff.minSize && fileSize > 0 {
-                        Text("\(fileSizeStr) (Nhẹ hơn)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(CFinderTheme.success)
-                    } else {
-                        Text(fileSizeStr)
-                            .font(.system(size: 10))
-                            .foregroundStyle(CFinderTheme.textMuted)
-                    }
+                    // File Size: Highlight if smallest size (only when size differs)
+                    let isMinSize = diff.sizeDiffers && fileSize == diff.minSize && fileSize > 0
+                    Text(fileSizeStr)
+                        .font(.system(size: 10, weight: isMinSize ? .semibold : .regular))
+                        .foregroundStyle(isMinSize ? Color(hex: "38BDF8") : CFinderTheme.textMuted)
                     
                     Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     
-                    // Bitrate
+                    // Bitrate: Highlight if highest bitrate in cluster!
+                    let isBestBitrate = diff.bitrateDiffers && effBitrate == diff.maxBitrate && effBitrate > 0
                     Text(bitrateStr)
-                        .font(.system(size: 10))
-                        .foregroundStyle(CFinderTheme.textMuted)
+                        .font(.system(size: 10, weight: isBestBitrate ? .bold : .regular))
+                        .foregroundStyle(isBestBitrate ? CFinderTheme.success : CFinderTheme.textMuted)
                     
                     Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     
-                    // Codec
-                    if diff.codecDiffers && (codec.contains("HEVC") || codec.contains("AV1")) {
-                        Text("\(codec) (Nén mới)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(CFinderTheme.success)
-                    } else {
-                        Text(codec)
-                            .font(.system(size: 10))
-                            .foregroundStyle(CFinderTheme.textMuted)
-                    }
+                    // Codec: Highlight modern codecs (HEVC / AV1)
+                    let isModernCodec = diff.codecDiffers && (codec.contains("HEVC") || codec.contains("AV1"))
+                    Text(codec)
+                        .font(.system(size: 10, weight: isModernCodec ? .bold : .regular))
+                        .foregroundStyle(isModernCodec ? CFinderTheme.success : CFinderTheme.textMuted)
                 }
                 
                 // Line 3: File Directory Path + Source actions
