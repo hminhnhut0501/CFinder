@@ -75,8 +75,8 @@ public struct VideoTwinMetricsRow: View {
                     title: "Dung lượng tệp",
                     valA: ByteCountFormatter.string(fromByteCount: sizeA, countStyle: .file),
                     valB: ByteCountFormatter.string(fromByteCount: sizeB, countStyle: .file),
-                    isBestA: sizeA < sizeB && pixA >= pixB && sizeA > 0,
-                    isBestB: sizeB < sizeA && pixB >= pixA && sizeB > 0
+                    isBestA: sizeA > sizeB && sizeB > 0,
+                    isBestB: sizeB > sizeA && sizeA > 0
                 )
                 metricRow(
                     title: "Thời lượng",

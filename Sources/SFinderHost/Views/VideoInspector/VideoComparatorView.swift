@@ -158,6 +158,14 @@ public struct VideoComparatorView: View {
         Set(reports.map { Int(($0.primaryVideo?.fps ?? 0) * 10) }).count > 1
     }
     
+    private var maxDuration: Double {
+        reports.map { $0.durationSeconds }.max() ?? 0
+    }
+    private var hasDiffDuration: Bool {
+        let durs = reports.map { $0.durationSeconds }.filter { $0 > 0 }
+        return (durs.max() ?? 0) - (durs.min() ?? 0) >= 2.0 && durs.count > 1
+    }
+    
     // MARK: - Video Column Card
     
     private func videoColumnCard(report: VideoDetailedReport, isWinner: Bool) -> some View {
@@ -167,6 +175,7 @@ public struct VideoComparatorView: View {
         
         let pixels = (v?.displayWidth ?? 0) * (v?.displayHeight ?? 0)
         let isBestRes = hasDiffPixels && pixels == maxPixels && pixels > 0
+        let isBestDuration = hasDiffDuration && abs(report.durationSeconds - maxDuration) < 1.0 && report.durationSeconds > 0
         let bVal = (v?.bitrate ?? 0) > 0 ? (v?.bitrate ?? 0) : (report.durationSeconds > 0 ? Int64(Double(report.fileSize * 8) / report.durationSeconds) : 0)
         let isBestBitrate = hasDiffBitrate && bVal == maxBitrate && bVal > 0
         let isBestFPS = hasDiffFPS && (v?.fps ?? 0) == maxFPS && maxFPS > 0
@@ -259,7 +268,7 @@ public struct VideoComparatorView: View {
             
             // Metric Rows with Highlight
             VStack(spacing: 6) {
-                metricRow(title: "Thời lượng", value: formatDuration(report.durationSeconds))
+                metricRow(title: "Thời lượng", value: formatDuration(report.durationSeconds), isBest: isBestDuration)
                 metricRow(title: "Mật độ Bitrate (BPPF)", value: String(format: "%.3f bppf", score.bitsPerPixelFrame), badge: score.bppfHealth.rawValue, badgeColor: Color(hex: score.bppfHealth.badgeColorHex))
                 metricRow(title: "Độ phân giải", value: v.map { "\($0.displayWidth)×\($0.displayHeight)" } ?? "—", isBest: isBestRes)
                 metricRow(title: "Codec video", value: v?.humanCodec ?? "—", isBest: isModernCodec)

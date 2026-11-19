@@ -13,6 +13,9 @@ private struct ClusterParamDiff {
     let resolutionDiffers: Bool
     let maxPixels: Int
     
+    let durationDiffers: Bool
+    let maxDuration: Double
+    
     let bitrateDiffers: Bool
     let maxBitrate: Int64
     
@@ -33,6 +36,13 @@ private struct ClusterParamDiff {
         }
         resolutionDiffers = Set(pixels).count > 1
         maxPixels = pixels.max() ?? 0
+        
+        let durations = assets.map { $0.metadata?.durationSeconds ?? 0 }
+        let validDurations = durations.filter { $0 > 0 }
+        let minDur = validDurations.min() ?? 0
+        let maxDur = validDurations.max() ?? 0
+        durationDiffers = (maxDur - minDur) >= 2.0 && validDurations.count > 1
+        maxDuration = maxDur
         
         let bitrates = assets.map { a -> Int64 in
             if let b = a.metadata?.videoStream?.bitrate, b > 0 { return b }
@@ -289,19 +299,20 @@ public struct VideoTwinClusterGroupCard: View {
                     
                     Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     
-                    // Duration
+                    // Duration: Highlight if longest duration in cluster
                     if durationSec > 0 {
+                        let isBestDur = diff.durationDiffers && abs(durationSec - diff.maxDuration) < 1.0
                         Text(durationStr)
-                            .font(.system(size: 10))
-                            .foregroundStyle(CFinderTheme.textMuted)
+                            .font(.system(size: 10, weight: isBestDur ? .bold : .regular))
+                            .foregroundStyle(isBestDur ? CFinderTheme.success : CFinderTheme.textMuted)
                         Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     }
                     
-                    // File Size: Highlight if smallest size (only when size differs)
-                    let isMinSize = diff.sizeDiffers && fileSize == diff.minSize && fileSize > 0
+                    // File Size: Highlight if largest file size (more data / higher quality content)
+                    let isBestSize = diff.sizeDiffers && fileSize == diff.maxSize && fileSize > 0
                     Text(fileSizeStr)
-                        .font(.system(size: 10, weight: isMinSize ? .semibold : .regular))
-                        .foregroundStyle(isMinSize ? Color(hex: "38BDF8") : CFinderTheme.textMuted)
+                        .font(.system(size: 10, weight: isBestSize ? .bold : .regular))
+                        .foregroundStyle(isBestSize ? CFinderTheme.success : CFinderTheme.textMuted)
                     
                     Text("•").font(.system(size: 8)).foregroundStyle(Color.white.opacity(0.2))
                     

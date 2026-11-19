@@ -65,6 +65,7 @@ public actor BestCopyRecommender {
         }
 
         // TIERED SORTING:
+        // Tier 0: Content Completeness Check (Bảo vệ bản đầy đủ, không bao giờ ưu tiên clip cắt ngắn)
         // Tier 1: Dominant Resolution Check (e.g. 1080p vs 720p, 4K vs 1080p)
         // Tier 2: Composite Quality Score (Resolution + Resolution-Aware Bitrate + Codec)
         // Tier 3: Effective Bitrate (Higher Bitrate wins when resolutions are identical)
@@ -78,6 +79,20 @@ public actor BestCopyRecommender {
             let pixB = pixelCount(b)
             let durA = a.asset.metadata?.durationSeconds ?? 0
             let durB = b.asset.metadata?.durationSeconds ?? 0
+            
+            // Tier 0: Content Completeness Check (Bản đầy đủ vs Clip ngắn)
+            if durA > 0 && durB > 0 {
+                let maxDur = max(durA, durB)
+                let minDur = min(durA, durB)
+                if maxDur >= minDur * 1.15 {
+                    if durA > durB && Double(pixA) >= Double(pixB) * 0.5 {
+                        return true
+                    }
+                    if durB > durA && Double(pixB) >= Double(pixA) * 0.5 {
+                        return false
+                    }
+                }
+            }
             
             // Tier 1: Dominant Resolution Check
             if pixA > 0 && pixB > 0 && Double(max(pixA, pixB)) >= Double(min(pixA, pixB)) * 1.15 {
@@ -113,6 +128,13 @@ public actor BestCopyRecommender {
             let candidate = evaluatedMembers[i]
             let diff = score(best) - score(candidate)
             if cleanIDs.contains(best.asset.id) && !cleanIDs.contains(candidate.asset.id) { continue }
+            
+            // If best has significantly longer duration, candidate can NEVER overturn it!
+            let durBest = best.asset.metadata?.durationSeconds ?? 0
+            let durCandidate = candidate.asset.metadata?.durationSeconds ?? 0
+            if durBest > 0 && durCandidate > 0 && durBest >= durCandidate * 1.15 {
+                continue
+            }
             
             // If best has significantly higher resolution, candidate can NEVER overturn it!
             let pixBest = pixelCount(best)
