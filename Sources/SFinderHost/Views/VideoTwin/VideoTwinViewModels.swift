@@ -68,13 +68,71 @@ public final class VideoTwinStudioViewModel: ObservableObject {
         autoSelectAllRecommended()
     }
     
-    private let targetURLs: [URL]
+    @Published public var targetURLs: [URL] = []
+    @Published public var hasStartedScanOnce: Bool = false
+    @Published public var hasNewSourcesPendingScan: Bool = false
+    
     private var scanner: FolderScanner?
     private var cancellables = Set<AnyCancellable>()
     private let fileActionEngine = FileActionEngine()
     
     public init(urls: [URL]) {
-        self.targetURLs = urls
+        self.targetURLs = urls.map { $0.standardizedFileURL }
+    }
+    
+    public struct TargetRootInfo: Identifiable, Hashable {
+        public let id: String
+        public let url: URL
+        public let name: String
+        public let isExternal: Bool
+        public let volumeName: String
+        public let path: String
+        public let isDirectory: Bool
+        
+        public init(url: URL) {
+            self.id = url.path
+            self.url = url
+            self.name = url.lastPathComponent
+            self.isExternal = url.isExternalVolume
+            self.volumeName = url.volumeName
+            self.path = url.path
+            var isDir: ObjCBool = false
+            FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+            self.isDirectory = isDir.boolValue
+        }
+    }
+    
+    public var targetRootsInfo: [TargetRootInfo] {
+        targetURLs.map { TargetRootInfo(url: $0) }
+    }
+    
+    public func addTargetURLs(_ urls: [URL]) {
+        let existing = Set(targetURLs.map { $0.standardizedFileURL.path })
+        var added = 0
+        for u in urls {
+            let std = u.standardizedFileURL
+            if !existing.contains(std.path) {
+                targetURLs.append(std)
+                added += 1
+            }
+        }
+        if added > 0 {
+            if hasStartedScanOnce {
+                hasNewSourcesPendingScan = true
+                statusToast = "Đã thêm \(added) nguồn mới. Bấm 'Quét lại' để cập nhật."
+            } else {
+                statusToast = "Đã thêm \(added) nguồn mới vào danh sách."
+            }
+        }
+    }
+    
+    public func removeTargetURL(_ url: URL) {
+        let p = url.standardizedFileURL.path
+        targetURLs.removeAll { $0.standardizedFileURL.path == p }
+        if hasStartedScanOnce {
+            hasNewSourcesPendingScan = true
+        }
+        statusToast = "Đã bỏ '\(url.lastPathComponent)' khỏi danh sách"
     }
     
     public var selectedCluster: DuplicateCluster? {
@@ -114,7 +172,10 @@ public final class VideoTwinStudioViewModel: ObservableObject {
     // MARK: - Scan Lifecycle
     
     public func startScan() {
+        guard !targetURLs.isEmpty else { return }
         guard !isScanning else { return }
+        hasStartedScanOnce = true
+        hasNewSourcesPendingScan = false
         errorMessage = nil
         cancellables.removeAll()
         
@@ -352,5 +413,30 @@ public final class VideoTwinStudioViewModel: ObservableObject {
         Task {
             await VideoTwinThumbnailCache.shared.clear()
         }
+    }
+}
+
+// MARK: - URL Volume & Storage Helpers
+
+extension URL {
+    public var isExternalVolume: Bool {
+        if let values = try? resourceValues(forKeys: [.volumeIsInternalKey, .volumeIsRemovableKey]) {
+            if let isInternal = values.volumeIsInternal, !isInternal { return true }
+            if let isRemovable = values.volumeIsRemovable, isRemovable { return true }
+        }
+        return path.hasPrefix("/Volumes/") && !path.hasPrefix("/Volumes/Macintosh HD")
+    }
+    
+    public var volumeName: String {
+        if let values = try? resourceValues(forKeys: [.volumeNameKey]), let name = values.volumeName, !name.isEmpty {
+            return name
+        }
+        if path.hasPrefix("/Volumes/") {
+            let components = path.components(separatedBy: "/")
+            if components.count > 2 && !components[2].isEmpty {
+                return components[2]
+            }
+        }
+        return "Ổ máy"
     }
 }
