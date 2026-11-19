@@ -18,14 +18,40 @@ public struct FrameSample: Sendable, Hashable, Codable, Identifiable {
 public struct VisualFingerprint: Sendable, Hashable, Codable {
     /// 64-bit dHash
     public var dHash: UInt64?
-    /// 64-element DCT pHash vector stored as hex
+    /// 64-element DCT pHash vector
     public var pHash: [UInt8]?
+    /// 64-bit dHash of the center safe region (strips outer 18% to ignore corner logos/captions)
+    public var centerDHash: UInt64?
+    /// 64-element DCT pHash of the center safe region
+    public var centerPHash: [UInt8]?
+    /// 2x2 grid pHashes (4 regions) for partial-occlusion robustness against large overlays/text
+    public var gridPHashes: [[UInt8]]?
     /// Vision FeaturePrint embedding (variable length)
     public var featurePrint: [Float]?
     /// Dominant color signature (compact histogram)
     public var colorSignature: [UInt8]?
     /// Algorithm versions for cache invalidation
     public let algorithmVersions: AlgorithmVersions
+
+    public init(
+        dHash: UInt64? = nil,
+        pHash: [UInt8]? = nil,
+        centerDHash: UInt64? = nil,
+        centerPHash: [UInt8]? = nil,
+        gridPHashes: [[UInt8]]? = nil,
+        featurePrint: [Float]? = nil,
+        colorSignature: [UInt8]? = nil,
+        algorithmVersions: AlgorithmVersions = AlgorithmVersions()
+    ) {
+        self.dHash = dHash
+        self.pHash = pHash
+        self.centerDHash = centerDHash
+        self.centerPHash = centerPHash
+        self.gridPHashes = gridPHashes
+        self.featurePrint = featurePrint
+        self.colorSignature = colorSignature
+        self.algorithmVersions = algorithmVersions
+    }
 }
 
 public struct AlgorithmVersions: Sendable, Hashable, Codable {
@@ -34,4 +60,6 @@ public struct AlgorithmVersions: Sendable, Hashable, Codable {
     public var featurePrint: String = "v1"
     public var colorSignature: String = "v1"
     public var normalization: String = "v1"
+
+    public init() {}
 }

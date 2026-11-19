@@ -3,41 +3,12 @@ import AppKit
 import UniformTypeIdentifiers
 import SFinderCore
 
-public enum RenameTab: String, CaseIterable, Identifiable, Hashable {
-    case numbering = "Đánh số thứ tự"
-    case prefixSuffix = "Thêm chữ (Trước / Sau)"
-    case replace = "Tìm & Thay thế"
-    case caseTransform = "Hoa / Thường"
-    case cleanups = "Bỏ dấu & Làm sạch"
-    case fileExtension = "Đuôi tệp"
-    
-    public var id: String { rawValue }
-    
-    public var icon: String {
-        switch self {
-        case .numbering: return "number"
-        case .prefixSuffix: return "text.insert"
-        case .replace: return "magnifyingglass"
-        case .caseTransform: return "textformat.size"
-        case .cleanups: return "sparkles"
-        case .fileExtension: return "doc"
-        }
-    }
-}
-
 public struct BatchRenameView: View {
     public let onDismiss: () -> Void
     
     @State private var currentURLs: [URL]
     @State private var rule = RenameRule.loadLastUsed()
     @State private var previews: [RenamePreviewItem] = []
-    @State private var selectedTab: RenameTab = {
-        if let lastTabId = RenameRule.loadLastTab(),
-           let tab = RenameTab(rawValue: lastTabId) {
-            return tab
-        }
-        return .numbering
-    }()
     @State private var statusMessage: String?
     @State private var isSuccess: Bool = false
     @State private var isApplying: Bool = false
@@ -45,7 +16,10 @@ public struct BatchRenameView: View {
     @State private var isDropTargeted: Bool = false
     @State private var ambientPulse: Bool = false
     @State private var emptyIconBounce: Bool = false
-    @Namespace private var tabNamespace
+    @State private var showPrefixBlock: Bool = false
+    @State private var showSuffixBlock: Bool = false
+    @State private var showTrimBlock: Bool = false
+    @State private var showFindReplaceBlock: Bool = false
     
     public init(urls: [URL], onDismiss: @escaping () -> Void) {
         self._currentURLs = State(initialValue: urls)
@@ -100,13 +74,12 @@ public struct BatchRenameView: View {
             VStack(spacing: 0) {
                 headerBar
                 Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
-                tabSelectionBar
                 controlPanelArea
                 fileListArea
                 footerBar
             }
         }
-        .frame(minWidth: 920, idealWidth: 960, minHeight: 640, idealHeight: 680)
+        .frame(minWidth: 960, idealWidth: 1020, minHeight: 640, idealHeight: 700)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(
@@ -146,10 +119,11 @@ public struct BatchRenameView: View {
             newRule.saveAsLastUsed()
             updatePreview()
         }
-        .onChange(of: selectedTab) { _, newTab in
-            RenameRule.saveLastTab(newTab.rawValue)
-        }
         .onAppear {
+            if !rule.prefix.isEmpty { showPrefixBlock = true }
+            if !rule.suffix.isEmpty { showSuffixBlock = true }
+            if rule.deleteFirstN > 0 || rule.deleteLastN > 0 { showTrimBlock = true }
+            if !rule.findText.isEmpty { showFindReplaceBlock = true }
             updatePreview()
             ambientPulse = true
         }
@@ -263,39 +237,6 @@ public struct BatchRenameView: View {
                 .help("Xóa toàn bộ tệp trong danh sách về trạng thái trống")
             }
             
-            // Clear all original name characters toggle (Icon + Compact Label)
-            Button(action: {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    rule.clearOriginalName.toggle()
-                    if rule.clearOriginalName {
-                        statusMessage = "Đã bật chế độ Xóa sạch ký tự tên cũ"
-                    } else {
-                        statusMessage = "Đã khôi phục giữ ký tự tên gốc"
-                    }
-                    isSuccess = true
-                }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: rule.clearOriginalName ? "eraser.fill" : "eraser.line.dashed")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("Xóa tên cũ")
-                        .font(.system(size: 11.5, weight: .medium))
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 9)
-                .frame(height: 28)
-                .background(rule.clearOriginalName ? Color(hex: "F43F5E").opacity(0.18) : Color.white.opacity(0.06))
-                .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .white.opacity(0.85))
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(rule.clearOriginalName ? Color(hex: "F43F5E").opacity(0.45) : Color.white.opacity(0.12), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .help(rule.clearOriginalName ? "Đang xóa sạch ký tự tên cũ (Bấm để giữ lại tên gốc)" : "Xóa toàn bộ ký tự tên cũ để đặt tên mới từ đầu")
-            
             // Reset rule button (Icon-only)
             Button(action: handleResetFormat) {
                 Image(systemName: "arrow.counterclockwise")
@@ -345,244 +286,30 @@ public struct BatchRenameView: View {
         .background(Color.white.opacity(0.015))
     }
     
-    // MARK: - 2. Mode Tab Bar
-    
-    private var tabSelectionBar: some View {
-        HStack(spacing: 6) {
-            ForEach(RenameTab.allCases, id: \.self) { tab in
-                let isSelected = selectedTab == tab
-                Button(action: {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
-                        selectedTab = tab
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
-                        Text(tab.rawValue)
-                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 7)
-                    .background(
-                        ZStack {
-                            if isSelected {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [CFinderTheme.FeatureColor.rename, Color(hex: "7C3AED")],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
-                                    )
-                                    .matchedGeometryEffect(id: "activeTabIndicator", in: tabNamespace)
-                                    .shadow(color: CFinderTheme.FeatureColor.rename.opacity(0.35), radius: 8, y: 2)
-                            } else {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.primary.opacity(0.03))
-                            }
-                        }
-                    )
-                    .foregroundColor(isSelected ? .white : .primary.opacity(0.85))
-                }
-                .buttonStyle(.plain)
-                .focusable(false)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 4)
-    }
-    
-    // MARK: - 3. Rule Controls Area
+    // MARK: - 2. Token Recipe Studio Area (Khối ghép công thức đổi tên thông minh)
     
     private var controlPanelArea: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Group {
-                switch selectedTab {
-                case .replace:
-                    HStack(spacing: 12) {
-                        glassInputField(title: "Tìm:", placeholder: "Từ khóa cần thay thế...", text: $rule.findText)
-                        glassInputField(title: "Thay bằng:", placeholder: "Từ mới (để trống để xóa)...", text: $rule.replaceText)
-                        
-                        Toggle("Regex", isOn: $rule.isRegex)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                        
-                        Toggle("Phân biệt Hoa/thường", isOn: $rule.matchCase)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                        
-                        Spacer()
-                    }
-                    
-                case .numbering:
-                    HStack(spacing: 12) {
-                        Picker("Định dạng:", selection: $rule.numberingFormat) {
-                            ForEach(NumberingFormat.allCases, id: \.self) { fmt in
-                                Text(fmt.rawValue).tag(fmt)
-                            }
-                        }
-                        .frame(width: 125)
-                        
-                        Picker("Vị trí:", selection: $rule.numberingPosition) {
-                            ForEach(NumberingPosition.allCases, id: \.self) { pos in
-                                Text(pos.rawValue).tag(pos)
-                            }
-                        }
-                        .frame(width: 170)
-                        
-                        if rule.numberingPosition == .replace || rule.clearOriginalName {
-                            glassInputField(title: "Tên mới:", placeholder: "Để trống để chỉ lấy số...", text: $rule.customBaseName)
-                                .frame(width: 160)
-                        }
-                        
-                        HStack(spacing: 4) {
-                            Text("Bắt đầu:")
-                                .font(.system(size: 11.5))
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                            NumberInputField(value: $rule.startNumber, range: 0...999999)
-                        }
-                        
-                        HStack(spacing: 4) {
-                            Text("Nối:")
-                                .font(.system(size: 11.5))
-                                .foregroundColor(.secondary)
-                            TextField("_", text: $rule.numberingSeparator)
-                                .textFieldStyle(.plain)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Color.primary.opacity(0.06))
-                                .cornerRadius(6)
-                                .frame(width: 36)
-                        }
-                        
-                        Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .lineLimit(1)
-                            .help("Xóa toàn bộ ký tự tên gốc để thay bằng tên mới hoặc chỉ số thứ tự")
-                        
-                        Toggle("Bật số", isOn: $rule.enableNumbering)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .lineLimit(1)
-                        
-                        Spacer()
-                    }
-                    
-                case .prefixSuffix:
-                    HStack(spacing: 12) {
-                        glassInputField(title: "Tiền tố:", placeholder: "Ví dụ: Final_, Tailieu_...", text: $rule.prefix)
-                        glassInputField(title: "Hậu tố:", placeholder: "Ví dụ: _v1.0, _HD...", text: $rule.suffix)
-                        
-                        Toggle("Xóa sạch tên cũ", isOn: $rule.clearOriginalName)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5, weight: .semibold))
-                            .lineLimit(1)
-                            .help("Xóa sạch ký tự tên gốc và chỉ giữ lại tiền tố / hậu tố vừa nhập")
-                        
-                        Spacer()
-                    }
-                    
-                case .caseTransform:
-                    HStack(spacing: 14) {
-                        Text("Kiểu chữ:")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.secondary)
-                        
-                        Picker("", selection: $rule.caseTransform) {
-                            ForEach(CaseTransform.allCases, id: \.self) { c in
-                                Text(c.rawValue).tag(c)
-                            }
-                        }
-                        .frame(width: 210)
-                        
-                        Text("Chỉ tác động phần tên chính, giữ nguyên đuôi tệp")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                        
-                        Spacer()
-                    }
-                    
-                case .cleanups:
-                    HStack(spacing: 14) {
-                        Toggle("Bỏ dấu tiếng Việt", isOn: $rule.removeAccents)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                        
-                        Toggle("Dấu cách -> Gạch ngang (-)", isOn: $rule.replaceSpacesWithDash)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                            .onChange(of: rule.replaceSpacesWithDash) { _, val in
-                                if val { rule.replaceSpacesWithUnderscore = false }
-                            }
-                        
-                        Toggle("Dấu cách -> Gạch dưới (_)", isOn: $rule.replaceSpacesWithUnderscore)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                            .onChange(of: rule.replaceSpacesWithUnderscore) { _, val in
-                                if val { rule.replaceSpacesWithDash = false }
-                            }
-                        
-                        Toggle("Cắt khoảng trắng thừa", isOn: $rule.trimSpaces)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5))
-                            .lineLimit(1)
-                        
-                        Toggle("Xóa sạch tên cũ (Chỉ giữ đuôi)", isOn: $rule.clearOriginalName)
-                            .toggleStyle(.checkbox)
-                            .font(.system(size: 11.5, weight: rule.clearOriginalName ? .bold : .medium))
-                            .foregroundColor(rule.clearOriginalName ? Color(hex: "F43F5E") : .primary)
-                            .lineLimit(1)
-                        
-                        Spacer()
-                    }
-                    
-                case .fileExtension:
-                    HStack(spacing: 14) {
-                        Text("Đuôi tệp:")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundColor(.secondary)
-                        
-                        Picker("", selection: $rule.extensionTransform) {
-                            ForEach(ExtensionTransform.allCases, id: \.self) { ext in
-                                Text(ext.rawValue).tag(ext)
-                            }
-                        }
-                        .frame(width: 190)
-                        
-                        if rule.extensionTransform == .custom {
-                            HStack(spacing: 4) {
-                                Text(".")
-                                TextField("jpg, png, mp4...", text: $rule.customExtension)
-                                    .textFieldStyle(.plain)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                                    .background(Color.primary.opacity(0.06))
-                                    .cornerRadius(6)
-                                    .frame(width: 100)
-                            }
-                        }
-                        Spacer()
-                    }
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .glassCard(cornerRadius: 12, strokeOpacity: 0.15, fillOpacity: 0.04)
-            .animation(.easeInOut(duration: 0.22), value: selectedTab)
+        VStack(alignment: .leading, spacing: 10) {
+            RecipeChainScrollView(
+                rule: $rule,
+                showPrefixBlock: $showPrefixBlock,
+                showSuffixBlock: $showSuffixBlock,
+                showTrimBlock: $showTrimBlock,
+                showFindReplaceBlock: $showFindReplaceBlock
+            )
+            
+            Divider().opacity(0.12)
+            
+            RecipeQuickUtilitiesBar(
+                rule: $rule,
+                onReset: handleResetFormat
+            )
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
+        .glassCard(cornerRadius: 12, strokeOpacity: 0.15, fillOpacity: 0.04)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
     }
     
     // MARK: - 4. Live Diff Preview List
@@ -850,12 +577,830 @@ public struct BatchRenameView: View {
         self.rule = RenameRule()
         self.rule.clearOriginalName = false
         self.rule.customBaseName = ""
-        self.selectedTab = .numbering
+        self.showPrefixBlock = false
+        self.showSuffixBlock = false
+        self.showTrimBlock = false
+        self.showFindReplaceBlock = false
         self.statusMessage = "Đã đặt lại quy tắc đổi tên về mặc định"
         self.isSuccess = true
         updatePreview()
     }
 }
+
+// MARK: - Recipe Studio Block Views
+
+struct RecipeChainScrollView: View {
+    @Binding var rule: RenameRule
+    @Binding var showPrefixBlock: Bool
+    @Binding var showSuffixBlock: Bool
+    @Binding var showTrimBlock: Bool
+    @Binding var showFindReplaceBlock: Bool
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                rootBlock
+                dateBlock
+                trimBlock
+                prefixBlock
+                numberingBlock
+                suffixBlock
+                findReplaceBlock
+                addBlock
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+        }
+    }
+    
+    @ViewBuilder
+    private var rootBlock: some View {
+        RecipeRootControlView(
+            clearOriginalName: $rule.clearOriginalName,
+            customBaseName: $rule.customBaseName
+        )
+        recipeArrow
+    }
+    
+    @ViewBuilder
+    private var dateBlock: some View {
+        if rule.enableDatePrefix {
+            RecipeDateBlockView(
+                isEnabled: $rule.enableDatePrefix,
+                format: $rule.datePrefixFormat
+            )
+            recipeArrow
+        }
+    }
+    
+    @ViewBuilder
+    private var trimBlock: some View {
+        if rule.deleteFirstN > 0 || rule.deleteLastN > 0 || showTrimBlock {
+            RecipeTrimCharsBlockView(
+                deleteFirstN: $rule.deleteFirstN,
+                deleteLastN: $rule.deleteLastN,
+                onClose: {
+                    rule.deleteFirstN = 0
+                    rule.deleteLastN = 0
+                    showTrimBlock = false
+                }
+            )
+            recipeArrow
+        }
+    }
+    
+    @ViewBuilder
+    private var prefixBlock: some View {
+        if !rule.prefix.isEmpty || showPrefixBlock {
+            RecipePrefixBlockView(
+                prefix: $rule.prefix,
+                onClose: {
+                    rule.prefix = ""
+                    showPrefixBlock = false
+                }
+            )
+            recipeArrow
+        }
+    }
+    
+    @ViewBuilder
+    private var numberingBlock: some View {
+        if rule.enableNumbering {
+            RecipeNumberingBlockView(
+                isEnabled: $rule.enableNumbering,
+                format: $rule.numberingFormat,
+                position: $rule.numberingPosition,
+                startNumber: $rule.startNumber,
+                separator: $rule.numberingSeparator
+            )
+            recipeArrow
+        }
+    }
+    
+    @ViewBuilder
+    private var suffixBlock: some View {
+        if !rule.suffix.isEmpty || showSuffixBlock {
+            RecipeSuffixBlockView(
+                suffix: $rule.suffix,
+                onClose: {
+                    rule.suffix = ""
+                    showSuffixBlock = false
+                }
+            )
+            recipeArrow
+        }
+    }
+    
+    @ViewBuilder
+    private var findReplaceBlock: some View {
+        if !rule.findText.isEmpty || showFindReplaceBlock {
+            RecipeFindReplaceBlockView(
+                findText: $rule.findText,
+                replaceText: $rule.replaceText,
+                isRegex: $rule.isRegex,
+                matchCase: $rule.matchCase,
+                onClose: {
+                    rule.findText = ""
+                    rule.replaceText = ""
+                    showFindReplaceBlock = false
+                }
+            )
+            recipeArrow
+        }
+    }
+    
+    private var addBlock: some View {
+        RecipeAddBlockMenu(
+            rule: $rule,
+            showPrefixBlock: $showPrefixBlock,
+            showSuffixBlock: $showSuffixBlock,
+            showTrimBlock: $showTrimBlock,
+            showFindReplaceBlock: $showFindReplaceBlock
+        )
+    }
+    
+    private var recipeArrow: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 9.5, weight: .bold))
+            .foregroundColor(.white.opacity(0.25))
+    }
+}
+
+struct RecipeRootControlView: View {
+    @Binding var clearOriginalName: Bool
+    @Binding var customBaseName: String
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Menu {
+                Button(action: {
+                    clearOriginalName = false
+                    customBaseName = ""
+                }) {
+                    Label("Giữ nguyên tên gốc", systemImage: "doc.text")
+                }
+                
+                Button(action: {
+                    clearOriginalName = true
+                }) {
+                    Label("Xóa sạch tên cũ", systemImage: "trash")
+                }
+                
+                Divider()
+                
+                Button(action: {
+                    clearOriginalName = true
+                    if customBaseName.isEmpty { customBaseName = "Item" }
+                }) {
+                    Label("Đặt tên cơ sở mới...", systemImage: "pencil")
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: clearOriginalName ? "trash.fill" : "doc.text.fill")
+                        .font(.system(size: 10.5, weight: .bold))
+                    Text(clearOriginalName ? "Xóa tên cũ" : "Giữ tên gốc")
+                        .font(.system(size: 11, weight: .bold))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .opacity(0.6)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    clearOriginalName
+                        ? Color(hex: "F43F5E").opacity(0.22)
+                        : Color.white.opacity(0.08)
+                )
+                .foregroundColor(clearOriginalName ? Color(hex: "F43F5E") : .white)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(
+                            clearOriginalName ? Color(hex: "F43F5E").opacity(0.4) : Color.white.opacity(0.18),
+                            lineWidth: 1
+                        )
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Khối #1: Chọn giữ tên gốc hoặc xóa sạch tên cũ để đánh số/ngày")
+            
+            if clearOriginalName {
+                HStack(spacing: 3) {
+                    TextField("Tên mới...", text: $customBaseName)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .frame(width: 90)
+                    if !customBaseName.isEmpty {
+                        Button(action: { customBaseName = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 9))
+                                .foregroundColor(.white.opacity(0.45))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 7)
+                .padding(.vertical, 4.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                .help("Tùy chọn: Nhập tên cơ sở thay thế tên gốc hoặc để trống")
+            }
+        }
+    }
+}
+
+struct RecipeDateBlockView: View {
+    @Binding var isEnabled: Bool
+    @Binding var format: DatePrefixFormat
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Menu {
+                ForEach(DatePrefixFormat.allCases, id: \.self) { fmt in
+                    Button(action: { format = fmt }) {
+                        HStack {
+                            Text(fmt.rawValue)
+                            if format == fmt { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4.5) {
+                    Image(systemName: "calendar")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(CFinderTheme.FeatureColor.rename)
+                    
+                    Text("Ngày:")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.75))
+                    
+                    Text(format.formatted())
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(CFinderTheme.FeatureColor.rename)
+                    
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .opacity(0.5)
+                }
+                .padding(.leading, 8)
+                .padding(.trailing, 4)
+                .padding(.vertical, 4.5)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            Button(action: { isEnabled = false }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Ngày")
+        }
+        .background(CFinderTheme.FeatureColor.rename.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(CFinderTheme.FeatureColor.rename.opacity(0.32), lineWidth: 0.9))
+    }
+}
+
+struct RecipeTrimCharsBlockView: View {
+    @Binding var deleteFirstN: Int
+    @Binding var deleteLastN: Int
+    let onClose: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "scissors")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color.orange)
+                .padding(.leading, 8)
+            
+            Text("Cắt:")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+            
+            HStack(spacing: 3) {
+                Text("Đầu")
+                    .font(.system(size: 9.5))
+                    .foregroundColor(.secondary)
+                NumberInputField(value: $deleteFirstN, range: 0...999)
+                    .frame(width: 50)
+            }
+            
+            HStack(spacing: 3) {
+                Text("Đuôi")
+                    .font(.system(size: 9.5))
+                    .foregroundColor(.secondary)
+                NumberInputField(value: $deleteLastN, range: 0...999)
+                    .frame(width: 50)
+            }
+            
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Cắt ký tự")
+        }
+        .padding(.vertical, 3.5)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color.orange.opacity(0.3), lineWidth: 0.9))
+    }
+}
+
+struct RecipePrefixBlockView: View {
+    @Binding var prefix: String
+    let onClose: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "text.insert")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color(hex: "06B6D4"))
+                .padding(.leading, 8)
+            
+            Text("Tiền tố:")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+            
+            TextField("TG@...", text: $prefix)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .frame(minWidth: 80, maxWidth: 140)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(5)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Tiền tố")
+        }
+        .padding(.vertical, 3.5)
+        .background(Color(hex: "06B6D4").opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color(hex: "06B6D4").opacity(0.3), lineWidth: 0.9))
+    }
+}
+
+struct RecipeNumberingBlockView: View {
+    @Binding var isEnabled: Bool
+    @Binding var format: NumberingFormat
+    @Binding var position: NumberingPosition
+    @Binding var startNumber: Int
+    @Binding var separator: String
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "number")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(Color(hex: "8B5CF6"))
+                .padding(.leading, 8)
+            
+            Text("Đánh số:")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+            
+            Menu {
+                ForEach(NumberingFormat.allCases, id: \.self) { fmt in
+                    Button(action: { format = fmt }) {
+                        HStack {
+                            Text(fmt.rawValue)
+                            if format == fmt { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(format.rawValue)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .opacity(0.6)
+                }
+                .foregroundColor(Color(hex: "8B5CF6"))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            Menu {
+                ForEach(NumberingPosition.allCases, id: \.self) { pos in
+                    Button(action: { position = pos }) {
+                        HStack {
+                            Text(pos.rawValue)
+                            if position == pos { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(position == .prefix ? "Đầu tên" : (position == .suffix ? "Cuối tên" : "Chỉ số"))
+                        .font(.system(size: 10.5, weight: .medium))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .opacity(0.6)
+                }
+                .foregroundColor(.white.opacity(0.85))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            HStack(spacing: 2) {
+                Text("từ")
+                    .font(.system(size: 9.5))
+                    .foregroundColor(.secondary)
+                NumberInputField(value: $startNumber, range: 0...999999)
+                    .frame(width: 48)
+            }
+            
+            Button(action: { isEnabled = false }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Đánh số")
+        }
+        .padding(.vertical, 3.5)
+        .background(Color(hex: "8B5CF6").opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color(hex: "8B5CF6").opacity(0.3), lineWidth: 0.9))
+    }
+}
+
+struct RecipeSuffixBlockView: View {
+    @Binding var suffix: String
+    let onClose: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "text.append")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color(hex: "3B82F6"))
+                .padding(.leading, 8)
+            
+            Text("Hậu tố:")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundColor(.white.opacity(0.75))
+            
+            TextField("_v1...", text: $suffix)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11, weight: .medium, design: .rounded))
+                .frame(minWidth: 80, maxWidth: 140)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(5)
+                .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
+            
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Hậu tố")
+        }
+        .padding(.vertical, 3.5)
+        .background(Color(hex: "3B82F6").opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color(hex: "3B82F6").opacity(0.3), lineWidth: 0.9))
+    }
+}
+
+struct RecipeFindReplaceBlockView: View {
+    @Binding var findText: String
+    @Binding var replaceText: String
+    @Binding var isRegex: Bool
+    @Binding var matchCase: Bool
+    let onClose: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Color(hex: "10B981"))
+                .padding(.leading, 8)
+            
+            TextField("Tìm...", text: $findText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .frame(width: 75)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(5)
+            
+            Image(systemName: "arrow.right")
+                .font(.system(size: 8))
+                .foregroundColor(.secondary)
+            
+            TextField("Thay...", text: $replaceText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .frame(width: 75)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2.5)
+                .background(Color.white.opacity(0.06))
+                .cornerRadius(5)
+            
+            Button(action: { matchCase.toggle() }) {
+                Text("Aa")
+                    .font(.system(size: 9.5, weight: matchCase ? .bold : .regular))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(matchCase ? Color(hex: "10B981").opacity(0.3) : Color.white.opacity(0.06))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .help("Khớp chữ Hoa/thường")
+            
+            Button(action: { isRegex.toggle() }) {
+                Text(".*")
+                    .font(.system(size: 9.5, weight: isRegex ? .bold : .regular, design: .monospaced))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
+                    .background(isRegex ? Color(hex: "10B981").opacity(0.3) : Color.white.opacity(0.06))
+                    .cornerRadius(4)
+            }
+            .buttonStyle(.plain)
+            .help("Biểu thức Regex")
+            
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(3)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+            .help("Gỡ khối Tìm & Thay thế")
+        }
+        .padding(.vertical, 3.5)
+        .background(Color(hex: "10B981").opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(Color(hex: "10B981").opacity(0.3), lineWidth: 0.9))
+    }
+}
+
+struct RecipeAddBlockMenu: View {
+    @Binding var rule: RenameRule
+    @Binding var showPrefixBlock: Bool
+    @Binding var showSuffixBlock: Bool
+    @Binding var showTrimBlock: Bool
+    @Binding var showFindReplaceBlock: Bool
+    
+    var body: some View {
+        Menu {
+            Button(action: {
+                withAnimation { rule.enableDatePrefix = true }
+            }) {
+                Label("Thêm Ngày tự động (YYMMDD_)", systemImage: "calendar")
+            }
+            
+            Button(action: {
+                withAnimation { showPrefixBlock = true }
+            }) {
+                Label("Thêm Tiền tố (Prefix)", systemImage: "text.insert")
+            }
+            
+            Button(action: {
+                withAnimation {
+                    rule.enableNumbering = true
+                    rule.numberingPosition = .prefix
+                }
+            }) {
+                Label("Thêm Đánh số thứ tự (01, 02...)", systemImage: "number")
+            }
+            
+            Button(action: {
+                withAnimation { showSuffixBlock = true }
+            }) {
+                Label("Thêm Hậu tố (Suffix)", systemImage: "text.append")
+            }
+            
+            Button(action: {
+                withAnimation { showTrimBlock = true }
+            }) {
+                Label("Thêm Cắt bớt ký tự (Đầu/Đuôi)", systemImage: "scissors")
+            }
+            
+            Button(action: {
+                withAnimation { showFindReplaceBlock = true }
+            }) {
+                Label("Thêm Tìm & Thay thế chữ", systemImage: "magnifyingglass")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Thêm khối")
+                    .font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .bold))
+                    .opacity(0.6)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                LinearGradient(
+                    colors: [CFinderTheme.FeatureColor.rename.opacity(0.25), Color(hex: "7C3AED").opacity(0.25)],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .foregroundColor(.white)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(
+                        LinearGradient(
+                            colors: [CFinderTheme.FeatureColor.rename.opacity(0.6), Color(hex: "7C3AED").opacity(0.6)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        lineWidth: 1
+                    )
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("Thêm các khối ghép tên: Ngày, Tiền tố, Đánh số, Hậu tố, Cắt ký tự, Tìm thay thế")
+    }
+}
+
+struct RecipeQuickUtilitiesBar: View {
+    @Binding var rule: RenameRule
+    let onReset: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Toggle(isOn: $rule.removeAccents) {
+                Text("Bỏ dấu TV")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .toggleStyle(.checkbox)
+            
+            Divider().frame(height: 14).opacity(0.2)
+            
+            Menu {
+                Button("Giữ khoảng trắng") {
+                    rule.replaceSpacesWithDash = false
+                    rule.replaceSpacesWithUnderscore = false
+                }
+                Button("Đổi khoảng trắng thành gạch ngang (-)") {
+                    rule.replaceSpacesWithDash = true
+                    rule.replaceSpacesWithUnderscore = false
+                }
+                Button("Đổi khoảng trắng thành gạch dưới (_)") {
+                    rule.replaceSpacesWithUnderscore = true
+                    rule.replaceSpacesWithDash = false
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Dấu cách:")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                    Text(spaceLabel)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .opacity(0.5)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            Divider().frame(height: 14).opacity(0.2)
+            
+            Menu {
+                ForEach(CaseTransform.allCases, id: \.self) { c in
+                    Button(action: { rule.caseTransform = c }) {
+                        HStack {
+                            Text(c.rawValue)
+                            if rule.caseTransform == c { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Kiểu chữ:")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                    Text(rule.caseTransform.rawValue)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .opacity(0.5)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            Divider().frame(height: 14).opacity(0.2)
+            
+            Menu {
+                ForEach(ExtensionTransform.allCases, id: \.self) { ext in
+                    Button(action: { rule.extensionTransform = ext }) {
+                        HStack {
+                            Text(ext.rawValue)
+                            if rule.extensionTransform == ext { Image(systemName: "checkmark") }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Đuôi tệp:")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                    Text(rule.extensionTransform.rawValue)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .opacity(0.5)
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            
+            if rule.extensionTransform == .custom {
+                HStack(spacing: 2) {
+                    Text(".")
+                        .font(.system(size: 10.5, design: .monospaced))
+                    TextField("mp4...", text: $rule.customExtension)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(width: 55)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(4)
+                }
+            }
+            
+            Spacer()
+            
+            Button(action: onReset) {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 9))
+                    Text("Đặt lại")
+                        .font(.system(size: 10.5, weight: .medium))
+                }
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Color.white.opacity(0.05))
+                .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+            .help("Khôi phục toàn bộ quy tắc về mặc định ban đầu")
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 1)
+    }
+    
+    private var spaceLabel: String {
+        if rule.replaceSpacesWithDash { return "Đổi thành -" }
+        if rule.replaceSpacesWithUnderscore { return "Đổi thành _" }
+        return "Giữ nguyên"
+    }
+}
+
 
 // MARK: - Row Card Component
 
@@ -1169,9 +1714,9 @@ struct NumberInputField: View {
         .padding(.leading, 6)
         .padding(.trailing, 2)
         .padding(.vertical, 2.5)
-        .background(Color.primary.opacity(0.05))
+        .background(Color.white.opacity(0.06))
         .cornerRadius(6)
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.12), lineWidth: 0.6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.12), lineWidth: 0.6))
     }
     
     private func commitText() {

@@ -11,9 +11,11 @@ public struct FloatingOCRHUDView: View {
     let isTable: Bool
     let multiRegionCount: Int
     let onOpenURL: (() -> Void)?
+    let onCopyAgain: (() -> Void)?
     let onDismiss: () -> Void
     
     @State private var isHovered: Bool = false
+    @State private var justCopied: Bool = false
     
     public init(
         isSuccess: Bool,
@@ -25,6 +27,7 @@ public struct FloatingOCRHUDView: View {
         isTable: Bool = false,
         multiRegionCount: Int = 1,
         onOpenURL: (() -> Void)? = nil,
+        onCopyAgain: (() -> Void)? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.isSuccess = isSuccess
@@ -36,6 +39,7 @@ public struct FloatingOCRHUDView: View {
         self.isTable = isTable
         self.multiRegionCount = multiRegionCount
         self.onOpenURL = onOpenURL
+        self.onCopyAgain = onCopyAgain
         self.onDismiss = onDismiss
     }
     
@@ -70,9 +74,9 @@ public struct FloatingOCRHUDView: View {
             // Middle Content
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(title)
+                    Text(justCopied ? "✓ Đã sao chép vào Clipboard!" : title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.white)
+                        .foregroundColor(justCopied ? Color(red: 0.2, green: 0.95, blue: 0.6) : .white)
                     
                     if isTable {
                         Text("BẢNG TSV")
@@ -115,6 +119,20 @@ public struct FloatingOCRHUDView: View {
                         .font(.system(size: 11.5, weight: .regular))
                         .foregroundColor(.white.opacity(0.75))
                         .lineLimit(2)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if let onCopy = onCopyAgain {
+                    onCopy()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        justCopied = true
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation {
+                            justCopied = false
+                        }
+                    }
                 }
             }
             

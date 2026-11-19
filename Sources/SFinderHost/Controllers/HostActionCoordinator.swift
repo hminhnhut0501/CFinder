@@ -133,6 +133,9 @@ public final class HostActionCoordinator: ObservableObject {
             
         case .cancelCut:
             FinderCutManager.shared.cancelCut()
+            
+        case .normalizeVideo:
+            VideoNormalizerBatchCoordinator.shared.startBatch(urls: urls)
         }
     }
     

@@ -5,9 +5,23 @@ import Carbon
 import AudioToolbox
 import SFinderCore
 
+final class PopoverDelegate: NSObject, NSPopoverDelegate {
+    var onDidClose: (() -> Void)?
+    
+    init(onDidClose: (() -> Void)? = nil) {
+        self.onDidClose = onDidClose
+    }
+    
+    func popoverDidClose(_ notification: Notification) {
+        onDidClose?()
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var statusItem: NSStatusItem?
+    private var controlCenterPopover: NSPopover?
+    private var popoverDelegate: PopoverDelegate?
     var globalKeyMonitor: Any?
     var localKeyMonitor: Any?
     private var powerCancellable: AnyCancellable?
@@ -256,9 +270,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem?.menu = menu
+        if let button = statusItem?.button {
+            button.target = self
+            button.action = #selector(handleStatusItemClick)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("CFinderToggleControlCenter"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.togglePopover()
+        }
         
         updateStatusItemAppearance()
         
@@ -282,6 +306,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .sink { [weak self] in
                 self?.updateStatusItemAppearance()
             }
+    }
+    
+    // MARK: - Native Apple Control Center Popover (Tràn viền 0 margin thừa)
+    
+    @objc private func handleStatusItemClick() {
+        togglePopover()
+    }
+    
+    private func togglePopover() {
+        if let popover = controlCenterPopover, popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        showPopover()
+    }
+    
+    private func showPopover() {
+        SystemMonitorEngine.shared.retainMonitoring()
+        NetworkMonitorEngine.shared.retainMonitoring()
+        
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        
+        let controlCenterView = MenuBarControlCenterView { [weak popover] in
+            popover?.performClose(nil)
+        }
+        let hostingController = NSHostingController(rootView: controlCenterView)
+        popover.contentViewController = hostingController
+        
+        let delegate = PopoverDelegate { [weak self] in
+            SystemMonitorEngine.shared.releaseMonitoring()
+            NetworkMonitorEngine.shared.releaseMonitoring()
+            self?.controlCenterPopover = nil
+            self?.popoverDelegate = nil
+        }
+        popover.delegate = delegate
+        self.popoverDelegate = delegate
+        self.controlCenterPopover = popover
+        
+        if let button = statusItem?.button {
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        }
     }
     
     private func updateStatusItemAppearance() {
@@ -319,24 +387,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.title = ""
             button.toolTip = "CFinder: Chế độ giữ thức đang tắt (Bấm để xem menu, ⌘I để bật nhanh)"
         }
-    }
-    
-    // MARK: - NSMenuDelegate (Dynamic Liquid Glass Menu Generation)
-    
-    func menuWillOpen(_ menu: NSMenu) {
-        menu.removeAllItems()
-        
-        // Minimal Obsidian Liquid Glass Control Center
-        let controlCenterView = MenuBarControlCenterView { [weak menu] in
-            menu?.cancelTracking()
-        }
-        let hostingView = NSHostingView(rootView: controlCenterView)
-        let fitSize = hostingView.fittingSize
-        hostingView.frame = NSRect(x: 0, y: 0, width: 320, height: max(410, fitSize.height))
-        
-        let customItem = NSMenuItem()
-        customItem.view = hostingView
-        menu.addItem(customItem)
     }
     
     // MARK: - Action Handlers
@@ -650,18 +700,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         
         // 3. Local NSEvent monitor
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
             let key = event.charactersIgnoringModifiers?.lowercased()
             let preset = ScreenOCREngine.shared.currentPreset
             
-            if (event.keyCode == preset.keyCode && flags.rawValue & 0xFFFF0000 == preset.modifiers) || (flags == [.option] && (event.keyCode == 8 || key == "c")) {
-                DispatchQueue.main.async {
-                    Task {
-                        _ = try? await ScreenOCREngine.shared.captureScreenInteractively()
+            if self?.carbonHotKeyRef == nil {
+                if (event.keyCode == preset.keyCode && flags.rawValue & 0xFFFF0000 == preset.modifiers) || (flags == [.option] && (event.keyCode == 8 || key == "c")) {
+                    DispatchQueue.main.async {
+                        Task {
+                            _ = try? await ScreenOCREngine.shared.captureScreenInteractively()
+                        }
                     }
+                    return nil
                 }
-                return nil
             } else if flags == [.command] && (event.keyCode == 2 || key == "d") {
                 DispatchQueue.main.async {
                     HostActionCoordinator.shared.presentDashboard()

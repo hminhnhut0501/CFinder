@@ -45,6 +45,16 @@ public final class FloatingHUDController: NSObject {
         let titleSuffix = multiRegionCount > 1 ? " (Gộp \(multiRegionCount) vùng)" : ""
         let title = "Đã sao chép vào Clipboard\(titleSuffix)"
         
+        // Defensive double-check: ensure clipboard has fullText on MainActor
+        if !fullText.isEmpty {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.declareTypes([.string], owner: nil)
+            if !pasteboard.setString(fullText, forType: .string) {
+                _ = pasteboard.writeObjects([fullText as NSString])
+            }
+        }
+        
         showHUD(
             isSuccess: true,
             title: title,
@@ -58,7 +68,10 @@ public final class FloatingHUDController: NSObject {
                 if let url = URL(string: fullText.trimmingCharacters(in: .whitespacesAndNewlines)) {
                     NSWorkspace.shared.open(url)
                 }
-            } : nil
+            } : nil,
+            onCopyAgain: {
+                ScreenOCREngine.shared.copyToClipboard(text: fullText)
+            }
         )
     }
     
@@ -86,7 +99,8 @@ public final class FloatingHUDController: NSObject {
         isURL: Bool = false,
         isTable: Bool = false,
         multiRegionCount: Int = 1,
-        onOpenURL: (() -> Void)? = nil
+        onOpenURL: (() -> Void)? = nil,
+        onCopyAgain: (() -> Void)? = nil
     ) {
         dismissTimer?.invalidate()
         
@@ -100,6 +114,7 @@ public final class FloatingHUDController: NSObject {
             isTable: isTable,
             multiRegionCount: multiRegionCount,
             onOpenURL: onOpenURL,
+            onCopyAgain: onCopyAgain,
             onDismiss: { [weak self] in
                 self?.hideHUD()
             }

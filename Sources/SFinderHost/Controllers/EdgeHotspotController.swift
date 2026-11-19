@@ -16,11 +16,8 @@ public final class EdgeHotspotController: ObservableObject {
         }
     }
     
-    private var globalMouseMonitor: Any?
-    private var localMouseMonitor: Any?
+    private var hotspotWindows: [NSWindow] = []
     private var hoverTriggerTimer: Timer?
-    private var isHoverPending: Bool = false
-    private var hoverStartY: CGFloat = 0
     private var lastDismissTimestamp: TimeInterval = 0
     
     // Configurable dwell parameters
@@ -33,6 +30,14 @@ public final class EdgeHotspotController: ObservableObject {
         } else {
             self.isEdgeTriggerEnabled = UserDefaults.standard.bool(forKey: "CFinder_EdgeNotesHoverEnabled")
         }
+        
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.recreateHotspotWindows()
+        }
     }
     
     public func markJustDismissed() {
@@ -42,110 +47,113 @@ public final class EdgeHotspotController: ObservableObject {
     
     public func startMonitoring() {
         guard isEdgeTriggerEnabled else { return }
-        
-        if globalMouseMonitor == nil {
-            globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.handleMouseMove()
-                }
-            }
-        }
-        
-        if localMouseMonitor == nil {
-            localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
-                Task { @MainActor [weak self] in
-                    self?.handleMouseMove()
-                }
-                return event
-            }
-        }
-        NSLog("[EdgeHotspotController] Started monitoring mouse for edge notes (dwell: \(dwellDuration)s)")
+        recreateHotspotWindows()
+        NSLog("[EdgeHotspotController] Started native edge tracking areas for edge notes")
     }
     
     public func stopMonitoring() {
-        if let m = globalMouseMonitor {
-            NSEvent.removeMonitor(m)
-            globalMouseMonitor = nil
-        }
-        if let m = localMouseMonitor {
-            NSEvent.removeMonitor(m)
-            localMouseMonitor = nil
-        }
         cancelHover()
+        for win in hotspotWindows {
+            win.orderOut(nil)
+        }
+        hotspotWindows.removeAll()
     }
     
     private func cancelHover() {
         hoverTriggerTimer?.invalidate()
         hoverTriggerTimer = nil
-        isHoverPending = false
     }
     
-    private func handleMouseMove() {
+    private func recreateHotspotWindows() {
+        for win in hotspotWindows {
+            win.orderOut(nil)
+        }
+        hotspotWindows.removeAll()
         guard isEdgeTriggerEnabled else { return }
-        let mouse = NSEvent.mouseLocation
         
-        // Find screen containing mouse
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main else {
-            return
-        }
-        
-        let drawerController = EdgeNotesWindowController.shared
-        
-        // 1. If drawer is currently visible: track mouse inside/outside
-        if drawerController.isVisible {
-            if let win = drawerController.window {
-                let expandedFrame = win.frame.insetBy(dx: -10, dy: -10)
-                if expandedFrame.contains(mouse) {
-                    drawerController.handleMouseEnteredDrawer()
-                } else {
-                    drawerController.handleMouseExitedDrawer()
-                }
+        for screen in NSScreen.screens {
+            let sFrame = screen.frame
+            let vFrame = screen.visibleFrame
+            
+            // 2px wide strip along the right edge, avoiding top menu bar and bottom corners
+            let topMargin: CGFloat = 50
+            let bottomMargin: CGFloat = 50
+            let stripHeight = max(100, vFrame.height - topMargin - bottomMargin)
+            let stripY = vFrame.minY + bottomMargin
+            let stripX = sFrame.maxX - 2
+            
+            let rect = NSRect(x: stripX, y: stripY, width: 2, height: stripHeight)
+            let panel = NSPanel(
+                contentRect: rect,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            panel.isFloatingPanel = true
+            panel.level = .screenSaver
+            panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = false
+            panel.ignoresMouseEvents = false
+            
+            let stripView = EdgeHotspotStripView(frame: NSRect(x: 0, y: 0, width: 2, height: stripHeight))
+            stripView.onMouseEnter = { [weak self, weak screen] in
+                self?.handleEdgeTouch(on: screen)
             }
-            return
+            stripView.onMouseExit = { [weak self] in
+                self?.cancelHover()
+            }
+            panel.contentView = stripView
+            panel.orderFrontRegardless()
+            hotspotWindows.append(panel)
         }
-        
-        // 2. Cooldown check: ignore if user just closed the drawer
+    }
+    
+    private func handleEdgeTouch(on screen: NSScreen?) {
+        guard isEdgeTriggerEnabled else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        if now - lastDismissTimestamp < dismissCooldown {
-            cancelHover()
-            return
-        }
+        guard now - lastDismissTimestamp >= dismissCooldown else { return }
         
-        // 3. Touch right edge check (strictly within 1.5 pt of the rightmost display edge)
-        let rightEdgeX = screen.frame.maxX - 1.5
-        let topDeadZone = screen.visibleFrame.maxY - 50 // Avoid top menu bar & control center
-        let bottomDeadZone = screen.visibleFrame.minY + 50 // Avoid bottom corner hot corners
-        
-        let isTouchingRightEdge = (mouse.x >= rightEdgeX) && (mouse.y >= bottomDeadZone) && (mouse.y <= topDeadZone)
-        
-        if isTouchingRightEdge {
-            if !isHoverPending {
-                isHoverPending = true
-                hoverStartY = mouse.y
-                hoverTriggerTimer?.invalidate()
-                
-                hoverTriggerTimer = Timer.scheduledTimer(withTimeInterval: dwellDuration, repeats: false) { [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        guard let self = self else { return }
-                        self.isHoverPending = false
-                        let currentMouse = NSEvent.mouseLocation
-                        
-                        // Verify cursor is still at the edge and hasn't drifted wildly vertically
-                        if currentMouse.x >= rightEdgeX && abs(currentMouse.y - self.hoverStartY) <= 45 {
-                            drawerController.showDrawer()
-                        }
-                    }
-                }
-            } else {
-                // If the user drags or scrolls quickly vertically, cancel to avoid accidental popups
-                if abs(mouse.y - hoverStartY) > 55 {
-                    cancelHover()
-                }
-            }
-        } else {
-            if isHoverPending {
-                cancelHover()
+        cancelHover()
+        hoverTriggerTimer = Timer.scheduledTimer(withTimeInterval: dwellDuration, repeats: false) { [weak self] _ in
+            guard let self = self, self.isEdgeTriggerEnabled else { return }
+            self.hoverTriggerTimer = nil
+            
+            guard !EdgeNotesWindowController.shared.isVisible else { return }
+            
+            let mouse = NSEvent.mouseLocation
+            let targetScreen = screen ?? NSScreen.main ?? NSScreen.screens.first!
+            if mouse.x >= targetScreen.frame.maxX - 6.0 {
+                EdgeNotesWindowController.shared.showDrawer()
             }
         }
+    }
+}
+
+final class EdgeHotspotStripView: NSView {
+    var onMouseEnter: (() -> Void)?
+    var onMouseExit: (() -> Void)?
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        onMouseEnter?()
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        onMouseExit?()
     }
 }

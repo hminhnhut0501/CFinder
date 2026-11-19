@@ -71,7 +71,7 @@ public final class BatchRenameEngine: Sendable {
     
     // MARK: - Generate Previews
     
-    public func generatePreview(urls: [URL], rule: RenameRule) -> [RenamePreviewItem] {
+    public func generatePreview(urls: [URL], rule: RenameRule, referenceDate: Date = Date()) -> [RenamePreviewItem] {
         var items: [RenamePreviewItem] = []
         var plannedNewPaths: [String: Int] = [:] // Path -> Count (for detecting internal collisions)
         
@@ -88,6 +88,16 @@ public final class BatchRenameEngine: Sendable {
             // 0. Reset / Xóa sạch ký tự tên gốc
             if rule.clearOriginalName || rule.numberingPosition == .replace {
                 workingName = rule.customBaseName
+            }
+            
+            // 0.5. Xóa X ký tự phía trước (đầu) / phía sau (cuối)
+            if !rule.clearOriginalName && rule.numberingPosition != .replace {
+                if rule.deleteFirstN > 0 {
+                    workingName = String(workingName.dropFirst(rule.deleteFirstN))
+                }
+                if rule.deleteLastN > 0 {
+                    workingName = String(workingName.dropLast(rule.deleteLastN))
+                }
             }
             
             // 1. Find & Replace
@@ -127,9 +137,9 @@ public final class BatchRenameEngine: Sendable {
                 } else {
                     switch rule.numberingPosition {
                     case .prefix:
-                        workingName = "\(numStr)\(rule.numberingSeparator)\(workingName)"
+                        workingName = workingName.isEmpty ? numStr : "\(numStr)\(rule.numberingSeparator)\(workingName)"
                     case .suffix:
-                        workingName = "\(workingName)\(rule.numberingSeparator)\(numStr)"
+                        workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
                     case .replace:
                         workingName = workingName.isEmpty ? numStr : "\(workingName)\(rule.numberingSeparator)\(numStr)"
                     }
@@ -146,6 +156,22 @@ public final class BatchRenameEngine: Sendable {
                 }
             }
             
+            // Prevent empty file name
+            if workingName.isEmpty {
+                if rule.clearOriginalName || rule.numberingPosition == .replace {
+                    let currentNum = rule.startNumber + (index * rule.step)
+                    workingName = formatNumber(currentNum, format: rule.numberingFormat)
+                } else {
+                    workingName = baseName
+                }
+            }
+            
+            // 5.5. Date Prefix (Thêm ngày định dạng YYMMDD_ trước tiên - Tự động lấy hôm nay)
+            if rule.enableDatePrefix {
+                let dateStr = rule.datePrefixFormat.formatted(date: referenceDate)
+                workingName = "\(dateStr)\(workingName)"
+            }
+            
             // 6. Space formatting
             if rule.replaceSpacesWithDash {
                 workingName = workingName.replacingOccurrences(of: " ", with: "-")
@@ -155,16 +181,6 @@ public final class BatchRenameEngine: Sendable {
             
             if rule.trimSpaces {
                 workingName = workingName.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            
-            // Prevent empty file name
-            if workingName.isEmpty {
-                if rule.clearOriginalName || rule.numberingPosition == .replace {
-                    let currentNum = rule.startNumber + (index * rule.step)
-                    workingName = formatNumber(currentNum, format: rule.numberingFormat)
-                } else {
-                    workingName = baseName
-                }
             }
             
             // 7. Extension formatting

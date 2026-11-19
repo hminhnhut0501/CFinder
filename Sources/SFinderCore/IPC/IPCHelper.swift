@@ -10,6 +10,7 @@ public enum IPCActionType: String, Codable, Sendable {
     case cutFiles = "cutFiles"
     case pasteFiles = "pasteFiles"
     case cancelCut = "cancelCut"
+    case normalizeVideo = "normalizeVideo"
 }
 
 public struct IPCMessage: Codable, Identifiable, Sendable {

@@ -58,26 +58,25 @@ public struct MatchClassifier: Sendable {
             return (.nearDuplicate, confidence)
         }
 
-        // ── Contained clip ─────────────────────────────────────────────
-        // One video is a segment of the other:
-        //   - High coverage of shorter (coverageA or coverageB near 1.0)
-        //   - Low coverage of longer
-        //   - High visual score on the overlapping segment
-        if scores.coverageA > config.containedClipMinCoverage
-            && scores.coverageB < 0.5
-            && visual >= config.nearDuplicateThreshold {
-            return (.containedClip, confidence)
-        }
-        if scores.coverageB > config.containedClipMinCoverage
-            && scores.coverageA < 0.5
-            && visual >= config.nearDuplicateThreshold {
-            return (.containedClip, confidence)
+        // ── Contained clip / Split segment ─────────────────────────────
+        // One video is a segment of the other (including ~50/50 split clips):
+        if visual >= 0.80 && scores.alignment != nil {
+            if (scores.coverageA > config.containedClipMinCoverage && scores.coverageB < 0.85) ||
+               (scores.coverageB > config.containedClipMinCoverage && scores.coverageA < 0.85) {
+                return (.containedClip, confidence)
+            }
+            if maxCoverage >= 0.45 && coverage < 0.85 && scores.matchedSamples >= 4 {
+                return (.containedClip, confidence)
+            }
+            if scores.matchedSamples >= 4 && visual >= 0.82 {
+                return (.partialMatch, confidence)
+            }
         }
 
         // ── Trimmed variant ───────────────────────────────────────────
         // Both videos have high coverage of each other but one has added intro/outro
-        if visual >= config.nearDuplicateThreshold
-            && maxCoverage >= 0.85
+        if visual >= 0.82
+            && maxCoverage >= 0.80
             && coverage < 0.95
             && scores.alignment != nil {
             return (.trimmed, confidence)
@@ -117,8 +116,8 @@ public struct MatchClassifier: Sendable {
             return (.reencoded, confidence)
         }
 
-        // ── Near duplicate ────────────────────────────────────────────
-        if visual >= config.nearDuplicateThreshold * 0.95 {
+        // ── Near duplicate (allows moderate logo/text overlay down to 0.82) ──
+        if visual >= min(config.nearDuplicateThreshold * 0.93, 0.82) {
             return (.nearDuplicate, confidence)
         }
 
@@ -134,9 +133,19 @@ public struct MatchClassifier: Sendable {
 
     private func calculateConfidence(scores: ScoreInput) -> MatchConfidence {
         let visual = scores.visualScore
-        let sampleRatio = scores.totalSamples > 0
+        let rawRatio = scores.totalSamples > 0
             ? Float(scores.matchedSamples) / Float(scores.totalSamples)
             : 0
+
+        // For partial/split clips, evaluate matched ratio against the overlapping sample window
+        // rather than penalizing against the full length of the longer video.
+        let sampleRatio: Float
+        if let align = scores.alignment, align.alignmentConfidence >= 0.78, scores.matchedSamples >= 3 {
+            let overlapExpected = max(4, min(scores.totalSamples, 12))
+            sampleRatio = max(rawRatio, min(1.0, Float(scores.matchedSamples) / Float(overlapExpected)))
+        } else {
+            sampleRatio = rawRatio
+        }
 
         // Start with visual score contribution
         var score: Float = visual * 0.5
@@ -154,8 +163,9 @@ public struct MatchClassifier: Sendable {
             score += (audio - 0.7) * 0.1
         }
 
-        // Minimum sample threshold (spec §27)
-        guard scores.matchedSamples >= config.minimumAlignedSamples else {
+        // Minimum sample threshold (spec §27), allow 3 strong frames for short shared intros
+        let minRequired = visual >= 0.85 ? min(3, config.minimumAlignedSamples) : config.minimumAlignedSamples
+        guard scores.matchedSamples >= minRequired else {
             return .low
         }
 

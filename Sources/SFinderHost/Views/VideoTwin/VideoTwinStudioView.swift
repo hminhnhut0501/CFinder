@@ -30,6 +30,14 @@ public struct VideoTwinStudioView: View {
                     .fill(Color.white.opacity(0.06))
                     .frame(height: 1)
                 
+                // Secondary Toolbar: Source Folder & Batch Selection Strategy
+                if !viewModel.clusters.isEmpty {
+                    sourceAndActionToolBar
+                    Rectangle()
+                        .fill(Color.white.opacity(0.04))
+                        .frame(height: 1)
+                }
+                
                 // Main Content (Unified single vertical scroll list)
                 if viewModel.isScanning && viewModel.clusters.isEmpty {
                     scanningEmptyState
@@ -44,6 +52,8 @@ public struct VideoTwinStudioView: View {
                                     clusterIndex: index + 1,
                                     assetsByID: viewModel.assetsByID,
                                     selectedForRemoval: viewModel.selectedForRemoval,
+                                    isSourceFolderAsset: { viewModel.isAssetInSourceFolder($0) },
+                                    onSetAsSourceFolder: { viewModel.setSourceFolder(url: $0) },
                                     onToggleRemoval: { id in
                                         withAnimation(.easeInOut(duration: 0.18)) {
                                             viewModel.toggleRemoval(assetID: id)
@@ -157,7 +167,8 @@ public struct VideoTwinStudioView: View {
             message: {
                 let count = viewModel.selectedForRemoval.count
                 let sizeStr = ByteCountFormatter.string(fromByteCount: viewModel.selectedRemovalBytes, countStyle: .file)
-                Text("Bạn có chắc muốn chuyển \(count) video đã chọn vào Thùng rác?\n(Dung lượng giải phóng: \(sizeStr)). Bạn hoàn toàn có thể khôi phục lại từ Thùng rác của Mac nếu cần.")
+                let sourceNote = viewModel.sourceFolderName.map { "\n\n🛡️ Folder nguồn '\($0)' được bảo vệ an toàn tuyệt đối (không có bất kỳ tệp nào trong folder này bị xóa)." } ?? ""
+                Text("Bạn có chắc muốn chuyển \(count) video đã chọn vào Thùng rác?\n(Dung lượng giải phóng: \(sizeStr)).\(sourceNote)\nBạn hoàn toàn có thể khôi phục lại từ Thùng rác của Mac nếu cần.")
             }
         )
     }
@@ -175,6 +186,8 @@ public struct VideoTwinStudioView: View {
             return "\(urls.count) video được phân tích quét trùng lặp"
         }
     }
+    
+    // MARK: - Header Bar (Clean, Spacious)
     
     private var headerBar: some View {
         HStack(spacing: 12) {
@@ -236,55 +249,6 @@ public struct VideoTwinStudioView: View {
             
             Spacer()
             
-            // Global Selection Strategy Controls
-            if !viewModel.clusters.isEmpty {
-                HStack(spacing: 6) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            viewModel.autoSelectAllRecommended()
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 10))
-                            Text("Tự động chọn")
-                                .font(.system(size: 11.5, weight: .medium))
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.06))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.1), lineWidth: 1))
-                        .foregroundColor(.white.opacity(0.9))
-                    }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                    .help("Tự động giữ lại bản chất lượng cao nhất ở mỗi nhóm và chọn các bản sao để xóa")
-                    
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            viewModel.deselectAll()
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
-                                .font(.system(size: 10))
-                            Text("Tự chọn tay")
-                                .font(.system(size: 11.5, weight: .medium))
-                        }
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 5)
-                        .background(Color.white.opacity(0.04))
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
-                        .foregroundColor(.white.opacity(0.6))
-                    }
-                    .buttonStyle(.plain)
-                    .focusEffectDisabled()
-                    .help("Bỏ toàn bộ lựa chọn xóa để bạn tự tay bấm chọn từng video cần xóa")
-                }
-            }
-            
             // Scan Controls
             if viewModel.isScanning {
                 Button(action: { viewModel.togglePause() }) {
@@ -316,7 +280,7 @@ public struct VideoTwinStudioView: View {
                 TextField("Tìm kiếm video...", text: $viewModel.searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11.5))
-                    .frame(width: 130)
+                    .frame(width: 140)
                 if !viewModel.searchQuery.isEmpty {
                     Button(action: { viewModel.searchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
@@ -342,10 +306,10 @@ public struct VideoTwinStudioView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 220)
+            .frame(width: 210)
             .focusEffectDisabled()
             
-            // Close Button (Dashboard circular button)
+            // Close Button
             Button(action: {
                 viewModel.cleanup()
                 onDismiss()
@@ -365,8 +329,170 @@ public struct VideoTwinStudioView: View {
             .help("Đóng cửa sổ")
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(Color.white.opacity(0.015))
+    }
+    
+    // MARK: - Secondary Toolbar (Source Folder & Batch Selection)
+    
+    private var sourceAndActionToolBar: some View {
+        HStack(spacing: 12) {
+            // Source Folder Selector Menu
+            Menu {
+                if !viewModel.detectedFolders.isEmpty {
+                    Section("THƯ MỤC TRONG ĐỢT QUÉT") {
+                        ForEach(viewModel.detectedFolders, id: \.path) { folder in
+                            Button(action: {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    viewModel.setSourceFolder(url: folder.url)
+                                }
+                            }) {
+                                HStack {
+                                    if viewModel.sourceFolderPath == folder.path {
+                                        Image(systemName: "checkmark")
+                                    }
+                                    Text("\(folder.name) (\(folder.count) video)")
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                }
+                
+                Button(action: {
+                    selectCustomSourceFolder()
+                }) {
+                    Label("Chọn thư mục khác từ máy...", systemImage: "folder.badge.plus")
+                }
+                
+                if viewModel.sourceFolderPath != nil {
+                    Divider()
+                    Button(role: .destructive, action: {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            viewModel.clearSourceFolder()
+                        }
+                    }) {
+                        Label("Bỏ chọn Folder Nguồn", systemImage: "xmark.circle")
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: viewModel.sourceFolderPath != nil ? "shield.fill" : "shield")
+                        .font(.system(size: 11))
+                        .foregroundColor(viewModel.sourceFolderPath != nil ? Color(hex: "06B6D4") : .white.opacity(0.85))
+                    
+                    if let name = viewModel.sourceFolderName {
+                        Text("Folder nguồn: \(name)")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundColor(Color(hex: "06B6D4"))
+                            .lineLimit(1)
+                    } else {
+                        Text("Chọn Folder nguồn...")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                    
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(viewModel.sourceFolderPath != nil ? Color(hex: "06B6D4").opacity(0.14) : Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(viewModel.sourceFolderPath != nil ? Color(hex: "06B6D4").opacity(0.35) : Color.white.opacity(0.1), lineWidth: 1)
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize(horizontal: true, vertical: false)
+            .help(viewModel.sourceFolderPath != nil ? "Folder nguồn: \(viewModel.sourceFolderPath!). Khi tự động chọn, video trong thư mục này luôn được ưu tiên giữ lại." : "Chọn 1 thư mục làm Folder Nguồn để ưu tiên giữ lại các video trong đó")
+            
+            if viewModel.sourceFolderPath != nil {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        viewModel.clearSourceFolder()
+                    }
+                }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 8, weight: .bold))
+                        Text("Bỏ nguồn")
+                            .font(.system(size: 10.5))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(.white.opacity(0.55))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3.5)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Bỏ chọn Folder Nguồn")
+                
+                Text("• Ưu tiên giữ lại video trong Folder Nguồn khi tự động chọn")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(Color(hex: "06B6D4").opacity(0.8))
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            // Global Selection Strategy Controls (Fixed width, never wrap vertically!)
+            HStack(spacing: 6) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        viewModel.autoSelectAllRecommended()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10))
+                        Text("Tự động chọn")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(CFinderTheme.primary.opacity(0.18))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(CFinderTheme.primary.opacity(0.35), lineWidth: 1))
+                    .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Tự động giữ lại bản trong Folder Nguồn (hoặc bản chất lượng cao nhất) và chọn các bản sao khác để xóa")
+                
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        viewModel.deselectAll()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "xmark.circle")
+                            .font(.system(size: 10))
+                        Text("Tự chọn tay")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .background(Color.white.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.08), lineWidth: 1))
+                    .foregroundColor(.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .fixedSize(horizontal: true, vertical: false)
+                .help("Bỏ toàn bộ lựa chọn xóa để bạn tự tay bấm chọn từng video cần xóa")
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.12))
     }
     
     // MARK: - Empty States
@@ -451,6 +577,14 @@ public struct VideoTwinStudioView: View {
                     value: "\(ByteCountFormatter.string(fromByteCount: viewModel.selectedRemovalBytes, countStyle: .file)) giải phóng",
                     valueColor: Color(hex: "F59E0B")
                 )
+                
+                if let src = viewModel.sourceFolderName {
+                    statItem(
+                        icon: "lock.shield.fill",
+                        value: "Nguồn: \(src)",
+                        valueColor: Color(hex: "06B6D4")
+                    )
+                }
             }
             
             Spacer()
@@ -509,6 +643,20 @@ public struct VideoTwinStudioView: View {
             Text(value)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(valueColor)
+        }
+    }
+    
+    private func selectCustomSourceFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Chọn làm Folder Nguồn"
+        panel.message = "Chọn thư mục nguồn cần bảo vệ (không bao giờ bị chọn xóa các tệp trùng lặp):"
+        if panel.runModal() == .OK, let url = panel.url {
+            withAnimation(.easeInOut(duration: 0.22)) {
+                viewModel.setSourceFolder(url: url)
+            }
         }
     }
 }

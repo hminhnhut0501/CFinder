@@ -122,15 +122,16 @@ public struct PHasher: Sendable {
         return result
     }
 
-    /// Type-II DCT (normalized)
+    /// Type-II DCT (normalized) using cached vDSP setup
+    private static let dctSetup = vDSP.DCT(count: dctSize, transformType: .II)
+
     private static func dct1D(_ input: [Float]) -> [Float] {
         let n = input.count
         var output = [Float](repeating: 0, count: n)
 
-        // Use vDSP for fast DCT if available, otherwise naive
-        // vDSP DCT-II:
-        let setup = vDSP.DCT(count: n, transformType: .II)
-        if let s = setup {
+        if n == dctSize, let s = dctSetup {
+            output = s.transform(input)
+        } else if let s = vDSP.DCT(count: n, transformType: .II) {
             output = s.transform(input)
         } else {
             // Naive O(n²) fallback

@@ -7,13 +7,34 @@ public actor TimelineAligner {
     public init(config: SimilarityConfiguration = .default) { self.config = config }
 
     func align(framesA: [(timestamp: Double, dHash: UInt64)], framesB: [(timestamp: Double, dHash: UInt64)], durationA: Double, durationB: Double) -> AlignmentResult? {
-        guard framesA.count >= config.minimumAlignedSamples, framesB.count >= config.minimumAlignedSamples,
+        align(
+            framesA: framesA.map { ($0.timestamp, $0.dHash, nil) },
+            framesB: framesB.map { ($0.timestamp, $0.dHash, nil) },
+            durationA: durationA,
+            durationB: durationB
+        )
+    }
+
+    func align(framesA: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?)], framesB: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?)], durationA: Double, durationB: Double) -> AlignmentResult? {
+        let minRequired = min(3, config.minimumAlignedSamples)
+        guard framesA.count >= minRequired, framesB.count >= minRequired,
               durationA.isFinite, durationB.isFinite, durationA > 0, durationB > 0 else { return nil }
         let a = framesA.filter { $0.timestamp.isFinite }.sorted { $0.timestamp < $1.timestamp }
         let b = framesB.filter { $0.timestamp.isFinite }.sorted { $0.timestamp < $1.timestamp }
+        let alignThreshold = max(0.76, config.nearDuplicateThreshold - 0.10)
+
+        @inline(__always)
+        func frameSim(_ left: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?), _ right: (timestamp: Double, dHash: UInt64, centerDHash: UInt64?)) -> Float {
+            let full = DHasher.similarity(left.dHash, right.dHash)
+            if let ca = left.centerDHash, let cb = right.centerDHash {
+                return max(full, DHasher.similarity(ca, cb))
+            }
+            return full
+        }
+
         var offsets = Set<Double>([0])
         for left in a {
-            for right in b where DHasher.similarity(left.dHash, right.dHash) >= config.nearDuplicateThreshold {
+            for right in b where frameSim(left, right) >= alignThreshold {
                 offsets.insert(((right.timestamp - left.timestamp) * 10).rounded() / 10)
             }
         }
@@ -25,15 +46,15 @@ public actor TimelineAligner {
             for left in a {
                 let candidates = b.indices.filter { !used.contains($0) && abs(b[$0].timestamp - left.timestamp - offset) <= config.alignmentToleranceSeconds }
                 guard let index = candidates.max(by: {
-                    DHasher.similarity(left.dHash, b[$0].dHash) < DHasher.similarity(left.dHash, b[$1].dHash)
+                    frameSim(left, b[$0]) < frameSim(left, b[$1])
                 }) else { continue }
-                let similarity = DHasher.similarity(left.dHash, b[index].dHash)
-                guard similarity >= config.nearDuplicateThreshold else { continue }
+                let similarity = frameSim(left, b[index])
+                guard similarity >= alignThreshold else { continue }
                 used.insert(index)
                 scores.append(similarity)
                 deltas.append(b[index].timestamp - left.timestamp)
             }
-            guard scores.count >= config.minimumAlignedSamples else { continue }
+            guard scores.count >= minRequired else { continue }
             let average = scores.reduce(0, +) / Float(scores.count)
             deltas.sort()
             let refined = deltas[deltas.count / 2]

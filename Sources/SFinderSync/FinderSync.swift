@@ -164,6 +164,12 @@ public class FinderSync: FIFinderSync {
         videoInspectItem.representedObject = ["targets": containerPath.isEmpty ? [] : [containerPath]]
         menu.addItem(videoInspectItem)
         
+        let videoNormalizeItem = NSMenuItem(title: "Chuẩn hoá video trong thư mục này (Telegram / Web)...", action: #selector(handleNormalizeVideo(_:)), keyEquivalent: "")
+        videoNormalizeItem.image = makeWhiteIcon(systemName: "bolt.badge.play")
+        videoNormalizeItem.target = self
+        videoNormalizeItem.representedObject = ["targets": containerPath.isEmpty ? [] : [containerPath]]
+        menu.addItem(videoNormalizeItem)
+        
         let undoItem = NSMenuItem(title: "Hoàn tác đổi tên lần trước", action: #selector(handleUndoRename(_:)), keyEquivalent: "")
         undoItem.image = makeWhiteIcon(systemName: "arrow.uturn.backward")
         undoItem.target = self
@@ -220,6 +226,15 @@ public class FinderSync: FIFinderSync {
             inspectItem.target = self
             inspectItem.representedObject = ["targets": videoItems.map { $0.path }]
             menu.addItem(inspectItem)
+            
+            let normTitle = videoItems.count > 1
+                ? "Chuẩn hoá \(videoItems.count) video (Tối ưu Telegram / Web)..."
+                : "Chuẩn hoá video (Tối ưu Telegram / Web)..."
+            let normItem = NSMenuItem(title: normTitle, action: #selector(handleNormalizeVideo(_:)), keyEquivalent: "")
+            normItem.image = makeWhiteIcon(systemName: "film")
+            normItem.target = self
+            normItem.representedObject = ["targets": videoItems.map { $0.path }]
+            menu.addItem(normItem)
         }
         
         let undoItem = NSMenuItem(title: "Hoàn tác đổi tên lần trước", action: #selector(handleUndoRename(_:)), keyEquivalent: "")
@@ -303,6 +318,18 @@ public class FinderSync: FIFinderSync {
         let targets = (sender.representedObject as? [String: Any])?["targets"] as? [String] ?? []
         guard !targets.isEmpty else { return }
         let msg = IPCMessage(actionType: .cutFiles, targetPaths: targets)
+        try? IPCHelper.shared.send(message: msg)
+    }
+    
+    @objc private func handleNormalizeVideo(_ sender: NSMenuItem) {
+        var targets = (sender.representedObject as? [String: Any])?["targets"] as? [String] ?? []
+        if targets.isEmpty {
+            if let currentSelection = FIFinderSyncController.default().selectedItemURLs(), !currentSelection.isEmpty {
+                targets = currentSelection.map { $0.path }
+            }
+        }
+        NSLog("[SFinderSync] handleNormalizeVideo sending %ld targets to Normalizer", targets.count)
+        let msg = IPCMessage(actionType: .normalizeVideo, targetPaths: targets)
         try? IPCHelper.shared.send(message: msg)
     }
     

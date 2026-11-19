@@ -21,12 +21,52 @@ public final class VideoTwinStudioViewModel: ObservableObject {
     
     @Published public var selectedClusterID: UUID?
     @Published public var selectedForRemoval: Set<UUID> = []
+    @Published public var sourceFolderPath: String? = nil
     @Published public var activeDualComparison: (assetA: VideoAsset, assetB: VideoAsset, offset: Double)?
     @Published public var quickViewURL: URL? = nil
     @Published public var searchQuery: String = ""
     @Published public var filterTab: ClusterFilter = .all
     @Published public var statusToast: String?
     @Published public var errorMessage: String?
+    
+    public var sourceFolderName: String? {
+        guard let path = sourceFolderPath, !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+    
+    public var detectedFolders: [(url: URL, path: String, name: String, count: Int)] {
+        var counts: [String: Int] = [:]
+        for asset in assetsByID.values {
+            let dirPath = asset.path.deletingLastPathComponent().path
+            counts[dirPath, default: 0] += 1
+        }
+        return counts.map { (path, count) in
+            let url = URL(fileURLWithPath: path)
+            return (url: url, path: path, name: url.lastPathComponent, count: count)
+        }.sorted { $0.count > $1.count }
+    }
+    
+    public func isAssetInSourceFolder(_ asset: VideoAsset) -> Bool {
+        guard let source = sourceFolderPath, !source.isEmpty else { return false }
+        let assetDirPath = asset.path.deletingLastPathComponent().path
+        return assetDirPath == source || assetDirPath.hasPrefix(source + "/")
+    }
+    
+    public func setSourceFolder(url: URL?) {
+        guard let url else {
+            clearSourceFolder()
+            return
+        }
+        self.sourceFolderPath = url.path
+        self.statusToast = "Đã đặt '\(url.lastPathComponent)' làm Folder Nguồn bảo vệ"
+        autoSelectAllRecommended()
+    }
+    
+    public func clearSourceFolder() {
+        self.sourceFolderPath = nil
+        self.statusToast = "Đã hủy Folder Nguồn"
+        autoSelectAllRecommended()
+    }
     
     private let targetURLs: [URL]
     private var scanner: FolderScanner?
@@ -160,13 +200,42 @@ public final class VideoTwinStudioViewModel: ObservableObject {
     private func autoSelectDuplicatesForRemoval(in clusters: [DuplicateCluster]) {
         var toRemove = Set<UUID>()
         for cluster in clusters {
-            // Keep the recommended one, select other duplicates for removal
-            for member in cluster.members {
-                if !member.isRecommendedKeep {
-                    toRemove.insert(member.assetID)
+            // Find all members in this cluster that belong to the source folder (if configured)
+            let sourceMemberIDs = cluster.members.compactMap { member -> UUID? in
+                if let asset = assetsByID[member.assetID], isAssetInSourceFolder(asset) {
+                    return member.assetID
+                }
+                return nil
+            }
+            
+            if !sourceMemberIDs.isEmpty {
+                // There are files from the source folder in this cluster:
+                // 1. ALL files in the source folder are KEPT (never removed)
+                // 2. All duplicate files OUTSIDE the source folder are marked for removal
+                for member in cluster.members {
+                    if !sourceMemberIDs.contains(member.assetID) {
+                        toRemove.insert(member.assetID)
+                    }
+                }
+            } else {
+                // Default: Keep the recommended one, select other duplicates for removal
+                let bestID = cluster.recommendedKeepID ?? cluster.members.first?.assetID
+                for member in cluster.members {
+                    if member.assetID != bestID {
+                        toRemove.insert(member.assetID)
+                    }
                 }
             }
         }
+        
+        // Safety filter: make sure no asset in source folder is ever in toRemove
+        toRemove = toRemove.filter { id in
+            if let asset = assetsByID[id] {
+                return !isAssetInSourceFolder(asset)
+            }
+            return true
+        }
+        
         self.selectedForRemoval = toRemove
     }
     

@@ -85,7 +85,13 @@ public actor CandidateGenerator {
         var pairs = Set<CandidatePair>()
         for asset in sorted {
             if Task.isCancelled { return [] }
-            let hashes = asset.fingerprints.compactMap { $0.visualFingerprint?.dHash }
+            let hashes: [UInt64] = asset.fingerprints.flatMap { sample -> [UInt64] in
+                var list: [UInt64] = []
+                if let d = sample.visualFingerprint?.dHash { list.append(d) }
+                if let cd = sample.visualFingerprint?.centerDHash { list.append(cd) }
+                return list
+            }
+            let distanceThreshold = partialOnly ? config.coarseCandidateDistance + 4 : config.coarseCandidateDistance + 2
             var visited = Set<UUID>()
             // Bound total neighbors per asset, including multi-frame queries.
             for hash in hashes {
@@ -95,7 +101,9 @@ public actor CandidateGenerator {
                     visited.insert(id)
                     guard let other = byID[id], compatible(asset, other, partialOnly: partialOnly),
                           other.fingerprints.contains(where: { sample in
-                              sample.visualFingerprint?.dHash.map { DHasher.hammingDistance(hash, $0) <= config.coarseCandidateDistance } ?? false
+                              let dMatch = sample.visualFingerprint?.dHash.map { DHasher.hammingDistance(hash, $0) <= distanceThreshold } ?? false
+                              let cMatch = sample.visualFingerprint?.centerDHash.map { DHasher.hammingDistance(hash, $0) <= distanceThreshold } ?? false
+                              return dMatch || cMatch
                           }) else { continue }
                     pairs.insert(CandidatePair(assetAID: other.id, assetBID: asset.id, reason: partialOnly ? .partialSearch : .coarseFingerprint))
                 }
@@ -125,7 +133,8 @@ public actor CandidateGenerator {
         if partialOnly { guard ratio >= 0.05, ratio < Double(config.durationRatioMin) else { return false } }
         else { guard ratio >= Double(config.durationRatioMin) || abs(da - db) <= config.durationToleranceSeconds else { return false } }
         if let ma = a.metadata?.videoStream, let mb = b.metadata?.videoStream {
-            guard ma.aspectRatio > 0, mb.aspectRatio > 0, abs(ma.aspectRatio - mb.aspectRatio) / max(ma.aspectRatio, mb.aspectRatio) < 0.2 else { return false }
+            let maxRatioDiff = partialOnly ? 0.30 : 0.25
+            guard ma.aspectRatio > 0, mb.aspectRatio > 0, abs(ma.aspectRatio - mb.aspectRatio) / max(ma.aspectRatio, mb.aspectRatio) < maxRatioDiff else { return false }
         }
         return true
     }

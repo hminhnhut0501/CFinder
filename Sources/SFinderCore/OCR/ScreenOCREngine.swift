@@ -3,6 +3,7 @@ import AppKit
 import Vision
 import AudioToolbox
 import Carbon
+import os
 
 public struct OCRHotKeyPreset: Identifiable, Hashable, Sendable {
     public let id: String
@@ -210,9 +211,9 @@ public final class ScreenOCREngine: @unchecked Sendable {
     // MARK: - Model Warmup (Tránh lag / delay lần đầu mở app)
     
     public func warmup() {
-        Task.detached(priority: .background) {
-            let width = 32
-            let height = 32
+        Task.detached(priority: .userInitiated) {
+            let width = 64
+            let height = 64
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             var rawData = [UInt8](repeating: 255, count: width * height * 4)
             guard let context = CGContext(
@@ -233,129 +234,76 @@ public final class ScreenOCREngine: @unchecked Sendable {
             req.usesLanguageCorrection = true
             req.automaticallyDetectsLanguage = false
             
+            let barcodeReq = VNDetectBarcodesRequest()
+            barcodeReq.symbologies = [.qr]
+            
             let handler = VNImageRequestHandler(cgImage: dummyCG, options: [:])
             try? handler.perform([req])
-            NSLog("[ScreenOCREngine] Vision OCR models pre-warmed successfully.")
+            try? handler.perform([barcodeReq])
+            NSLog("[ScreenOCREngine] Vision OCR and QR models pre-warmed successfully.")
         }
     }
     
     // MARK: - Core Recognition Engine
     
     public func recognize(image: CGImage) async throws -> String {
-        return try await withCheckedThrowingContinuation { continuation in
-            var barcodePayload: String? = nil
-            var barcodeRequest: VNDetectBarcodesRequest? = nil
-            
-            if self.detectQR {
-                barcodeRequest = VNDetectBarcodesRequest { request, _ in
-                    if let results = request.results as? [VNBarcodeObservation], !results.isEmpty {
-                        let payloads = results.compactMap { $0.payloadStringValue }
-                        if let first = payloads.first, !first.isEmpty {
-                            barcodePayload = first
-                        }
-                    }
-                }
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
+
+        // If barcode / QR found, prefer it; ignore barcode errors so text OCR still runs.
+        if self.detectQR, let barcode = recognizeBarcodes(using: handler) {
+            return barcode
+        }
+
+        let textRequest = VNRecognizeTextRequest()
+        // Maximum accuracy with dedicated Vietnamese & English language models
+        textRequest.recognitionLevel = .accurate
+        textRequest.recognitionLanguages = ["vi-VT", "en-US"]
+        textRequest.usesLanguageCorrection = true
+        textRequest.automaticallyDetectsLanguage = false
+
+        try handler.perform([textRequest])
+
+        guard let observations = textRequest.results, !observations.isEmpty else {
+            return ""
+        }
+
+        // Mode A: Table Detection (Format as Tab-Separated TSV for Excel/Sheets)
+        if self.tableDetection {
+            return self.formatObservationsAsTable(observations)
+        }
+
+        // Mode B: Standard Reading Order (Top-Down, Left-to-Right)
+        let sorted = observations.sorted { obs1, obs2 in
+            let y1 = obs1.boundingBox.origin.y
+            let y2 = obs2.boundingBox.origin.y
+            if abs(y1 - y2) < 0.025 {
+                return obs1.boundingBox.origin.x < obs2.boundingBox.origin.x
             }
-            
-            let textRequest = VNRecognizeTextRequest { [weak self] request, error in
-                if let error = error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                
-                // If barcode / QR found, prefer it
-                if let barcode = barcodePayload, !barcode.isEmpty {
-                    continuation.resume(returning: barcode)
-                    return
-                }
-                
-                guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                    continuation.resume(returning: "")
-                    return
-                }
-                
-                guard let self = self else {
-                    continuation.resume(returning: "")
-                    return
-                }
-                
-                if observations.isEmpty {
-                    continuation.resume(returning: "")
-                    return
-                }
-                
-                // Mode A: Table Detection (Format as Tab-Separated TSV for Excel/Sheets)
-                if self.tableDetection {
-                    let formattedTable = self.formatObservationsAsTable(observations)
-                    continuation.resume(returning: formattedTable)
-                    return
-                }
-                
-                // Mode B: Standard Reading Order (Top-Down, Left-to-Right)
-                let sorted = observations.sorted { obs1, obs2 in
-                    let y1 = obs1.boundingBox.origin.y
-                    let y2 = obs2.boundingBox.origin.y
-                    if abs(y1 - y2) < 0.025 {
-                        return obs1.boundingBox.origin.x < obs2.boundingBox.origin.x
-                    }
-                    return y1 > y2
-                }
-                
-                let lines = sorted.compactMap { $0.topCandidates(1).first?.string }
-                let recognizedText: String
-                if self.ignoreLineBreaks {
-                    recognizedText = lines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-                } else {
-                    recognizedText = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                
-                continuation.resume(returning: recognizedText)
-            }
-            
-            // Maximum accuracy with dedicated Vietnamese & English language models
-            textRequest.recognitionLevel = .accurate
-            textRequest.recognitionLanguages = ["vi-VT", "en-US"]
-            textRequest.usesLanguageCorrection = true
-            textRequest.automaticallyDetectsLanguage = false
-            
-            var requests: [VNRequest] = [textRequest]
-            if let br = barcodeRequest {
-                requests.append(br)
-            }
-            
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do {
-                try handler.perform(requests)
-            } catch {
-                continuation.resume(throwing: error)
-            }
+            return y1 > y2
+        }
+
+        let lines = sorted.compactMap { $0.topCandidates(1).first?.string }
+        if self.ignoreLineBreaks {
+            return lines.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         }
     }
     
     // MARK: - Barcode & QR Code Recognition
     
-    private func recognizeBarcodes(image: CGImage) async throws -> String? {
-        return try await withCheckedThrowingContinuation { continuation in
-            let request = VNDetectBarcodesRequest { request, error in
-                guard let results = request.results as? [VNBarcodeObservation], !results.isEmpty else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let payloads = results.compactMap { $0.payloadStringValue }
-                if let first = payloads.first, !first.isEmpty {
-                    continuation.resume(returning: first)
-                } else {
-                    continuation.resume(returning: nil)
-                }
-            }
-            
-            let handler = VNImageRequestHandler(cgImage: image, options: [:])
-            do {
-                try handler.perform([request])
-            } catch {
-                continuation.resume(returning: nil)
-            }
+    private func recognizeBarcodes(using handler: VNImageRequestHandler) -> String? {
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        do {
+            try handler.perform([request])
+        } catch {
+            return nil
         }
+        guard let results = request.results, !results.isEmpty else {
+            return nil
+        }
+        return results.compactMap { $0.payloadStringValue }.first(where: { !$0.isEmpty })
     }
     
     // MARK: - Table Detection Formatting
@@ -393,6 +341,34 @@ public final class ScreenOCREngine: @unchecked Sendable {
         return resultRows.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
+    private func runInteractiveScreenCapture(to outputURL: URL) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            let resumeOnce: @Sendable (Result<Void, Error>) -> Void = { result in
+                let shouldResume = resumed.withLock { state in
+                    guard !state else { return false }
+                    state = true
+                    return true
+                }
+                if shouldResume {
+                    continuation.resume(with: result)
+                }
+            }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-i", "-x", outputURL.path]
+            process.terminationHandler = { _ in
+                resumeOnce(.success(()))
+            }
+            do {
+                try process.run()
+            } catch {
+                resumeOnce(.failure(error))
+            }
+        }
+    }
+
     // MARK: - Interactive Screen Capture (Single Region)
     
     public func captureScreenInteractively() async throws -> String {
@@ -404,35 +380,30 @@ public final class ScreenOCREngine: @unchecked Sendable {
             endCapture()
         }
         
+        let startTime = Date()
         let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("sfinder_ocr_\(UUID().uuidString).png")
         defer {
             try? FileManager.default.removeItem(at: tempURL)
         }
         
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            process.arguments = ["-i", "-x", tempURL.path]
-            process.terminationHandler = { _ in
-                continuation.resume()
-            }
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: error)
-            }
-        }
+        try await runInteractiveScreenCapture(to: tempURL)
         
         guard FileManager.default.fileExists(atPath: tempURL.path) else {
+            NSLog("[ScreenOCREngine] Capture cancelled or no image produced.")
             return ""
         }
         
         guard let imageSource = CGImageSourceCreateWithURL(tempURL as CFURL, nil),
               let cgImage = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            NSLog("[ScreenOCREngine] Failed to load CGImage from captured file.")
             return ""
         }
         
+        let ocrStartTime = Date()
         let recognizedText = try await recognize(image: cgImage)
+        let totalElapsed = Date().timeIntervalSince(startTime)
+        let ocrElapsed = Date().timeIntervalSince(ocrStartTime)
+        NSLog("[ScreenOCREngine] OCR recognized %ld characters in %.3fs (total elapsed: %.3fs)", recognizedText.count, ocrElapsed, totalElapsed)
         
         if !recognizedText.isEmpty {
             handleSuccessfulOCR(text: recognizedText)
@@ -451,19 +422,7 @@ public final class ScreenOCREngine: @unchecked Sendable {
         for regionIndex in 1...10 {
             let tempURL = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("sfinder_multi_\(regionIndex)_\(UUID().uuidString).png")
             
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                let process = Process()
-                process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-                process.arguments = ["-i", "-x", tempURL.path]
-                process.terminationHandler = { _ in
-                    continuation.resume()
-                }
-                do {
-                    try process.run()
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
+            try await runInteractiveScreenCapture(to: tempURL)
             
             // If user pressed Esc, finish multi-region session
             guard FileManager.default.fileExists(atPath: tempURL.path) else {
@@ -583,9 +542,21 @@ public final class ScreenOCREngine: @unchecked Sendable {
     }
     
     public func copyToClipboard(text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let performCopy: @Sendable () -> Void = {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.declareTypes([.string], owner: nil)
+            let success = pasteboard.setString(text, forType: .string)
+            if !success {
+                _ = pasteboard.writeObjects([text as NSString])
+            }
+        }
+        
+        if Thread.isMainThread {
+            performCopy()
+        } else {
+            DispatchQueue.main.async(execute: performCopy)
+        }
     }
     
     private func addToHistory(_ text: String) {

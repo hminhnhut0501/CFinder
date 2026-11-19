@@ -39,7 +39,8 @@ public final class EdgeNotesWindowController: NSWindowController, ObservableObje
         
         super.init(window: panel)
         
-        let hostingView = NSHostingView(rootView: EdgeNotesDrawerView(controller: self))
+        let hostingView = EdgeDrawerHostingView(rootView: EdgeNotesDrawerView(controller: self))
+        hostingView.controller = self
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
@@ -165,5 +166,31 @@ public final class EdgeNotesWindowController: NSWindowController, ObservableObje
     public func handleMouseEnteredDrawer() {
         dismissTimer?.invalidate()
         dismissTimer = nil
+    }
+}
+
+final class EdgeDrawerHostingView: NSHostingView<EdgeNotesDrawerView> {
+    weak var controller: EdgeNotesWindowController?
+    
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        let area = NSTrackingArea(
+            rect: bounds.insetBy(dx: -15, dy: -15),
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+    }
+    
+    override func mouseEntered(with event: NSEvent) {
+        controller?.handleMouseEnteredDrawer()
+    }
+    
+    override func mouseExited(with event: NSEvent) {
+        controller?.handleMouseExitedDrawer()
     }
 }

@@ -73,6 +73,10 @@ public actor FrameSampler {
         }
     }
 
+    /// Absolute early-second anchors so videos of different lengths sharing the
+    /// same opening seconds (e.g. split clips, trimmed intros) share exact timestamps.
+    public static let earlyAnchorSeconds: [Double] = [0.5, 1.5, 3.0, 5.0, 8.0]
+
     /// Sample frames at the given level for `assetURL`.
     /// Returns frames in temporal order.
     /// Automatically skips black/white/degenerate frames.
@@ -87,10 +91,19 @@ public actor FrameSampler {
             return []
         }
 
-        let positions = level.positions
-        let timestamps = positions.map { $0 * duration }
+        let baseTimestamps = level.positions.map { $0 * duration }
+        var combinedTimestamps = baseTimestamps
 
-        return await decodeFrames(from: assetURL, at: timestamps, positions: positions, normalizer: normalizer)
+        // Inject absolute opening anchors if they don't collide within 0.35s of existing samples
+        for anchor in Self.earlyAnchorSeconds where anchor > 0.1 && anchor < duration * 0.96 {
+            if !combinedTimestamps.contains(where: { abs($0 - anchor) <= 0.35 }) {
+                combinedTimestamps.append(anchor)
+            }
+        }
+        combinedTimestamps.sort()
+        let finalPositions = combinedTimestamps.map { min(0.99, max(0.01, $0 / duration)) }
+
+        return await decodeFrames(from: assetURL, at: combinedTimestamps, positions: finalPositions, normalizer: normalizer)
     }
 
     /// Sample additional frames between two timestamps (for adaptive refinement).

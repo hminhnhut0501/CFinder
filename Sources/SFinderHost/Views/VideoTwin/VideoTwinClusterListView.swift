@@ -50,6 +50,8 @@ public struct VideoTwinClusterGroupCard: View {
     public let clusterIndex: Int
     public let assetsByID: [UUID: VideoAsset]
     public let selectedForRemoval: Set<UUID>
+    public let isSourceFolderAsset: (VideoAsset) -> Bool
+    public let onSetAsSourceFolder: (URL) -> Void
     public let onToggleRemoval: (UUID) -> Void
     public let onCompare: (VideoAsset, VideoAsset, Double) -> Void
     public let onQuickView: (URL) -> Void
@@ -59,7 +61,14 @@ public struct VideoTwinClusterGroupCard: View {
     }
     
     private var bestMemberID: UUID? {
-        cluster.recommendedKeepID ?? cluster.members.first?.assetID
+        let sourceMember = cluster.members.first(where: {
+            if let a = assetsByID[$0.assetID] { return isSourceFolderAsset(a) }
+            return false
+        })
+        if let sourceMember {
+            return sourceMember.assetID
+        }
+        return cluster.recommendedKeepID ?? cluster.members.first?.assetID
     }
     
     private var diff: ClusterParamDiff {
@@ -75,6 +84,8 @@ public struct VideoTwinClusterGroupCard: View {
         clusterIndex: Int,
         assetsByID: [UUID: VideoAsset],
         selectedForRemoval: Set<UUID>,
+        isSourceFolderAsset: @escaping (VideoAsset) -> Bool = { _ in false },
+        onSetAsSourceFolder: @escaping (URL) -> Void = { _ in },
         onToggleRemoval: @escaping (UUID) -> Void,
         onCompare: @escaping (VideoAsset, VideoAsset, Double) -> Void,
         onQuickView: @escaping (URL) -> Void
@@ -83,6 +94,8 @@ public struct VideoTwinClusterGroupCard: View {
         self.clusterIndex = clusterIndex
         self.assetsByID = assetsByID
         self.selectedForRemoval = selectedForRemoval
+        self.isSourceFolderAsset = isSourceFolderAsset
+        self.onSetAsSourceFolder = onSetAsSourceFolder
         self.onToggleRemoval = onToggleRemoval
         self.onCompare = onCompare
         self.onQuickView = onQuickView
@@ -186,6 +199,7 @@ public struct VideoTwinClusterGroupCard: View {
     // MARK: - Clean Video Row
     
     private func videoRow(asset: VideoAsset, isBest: Bool, isMarkedForTrash: Bool) -> some View {
+        let isSource = isSourceFolderAsset(asset)
         let stream = asset.metadata?.videoStream
         let width = stream?.displayWidth ?? 0
         let height = stream?.displayHeight ?? 0
@@ -230,7 +244,19 @@ public struct VideoTwinClusterGroupCard: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     
-                    if isBest {
+                    if isSource {
+                        HStack(spacing: 3) {
+                            Image(systemName: "shield.fill")
+                                .font(.system(size: 7))
+                            Text("Nguồn")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundStyle(Color(hex: "06B6D4"))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color(hex: "06B6D4").opacity(0.18))
+                        .clipShape(Capsule())
+                    } else if isBest {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill")
                                 .font(.system(size: 7))
@@ -300,16 +326,42 @@ public struct VideoTwinClusterGroupCard: View {
                     }
                 }
                 
-                // Line 3: File Directory Path
-                HStack(spacing: 4) {
-                    Image(systemName: "folder")
+                // Line 3: File Directory Path + Source actions
+                HStack(spacing: 6) {
+                    Image(systemName: isSource ? "folder.fill" : "folder")
                         .font(.system(size: 8))
-                        .foregroundStyle(CFinderTheme.textMuted.opacity(0.5))
+                        .foregroundStyle(isSource ? Color(hex: "06B6D4") : CFinderTheme.textMuted.opacity(0.5))
+                    
                     Text(asset.path.deletingLastPathComponent().path)
                         .font(.system(size: 9))
-                        .foregroundStyle(CFinderTheme.textMuted.opacity(0.7))
+                        .foregroundStyle(isSource ? Color(hex: "06B6D4") : CFinderTheme.textMuted.opacity(0.7))
                         .lineLimit(1)
                         .truncationMode(.middle)
+                    
+                    if isSource {
+                        Text("• Đã bảo vệ")
+                            .font(.system(size: 8.5, weight: .semibold))
+                            .foregroundStyle(Color(hex: "06B6D4"))
+                    } else {
+                        Button(action: {
+                            onSetAsSourceFolder(asset.path.deletingLastPathComponent())
+                        }) {
+                            HStack(spacing: 2.5) {
+                                Image(systemName: "shield")
+                                    .font(.system(size: 7.5))
+                                Text("Đặt làm nguồn")
+                                    .font(.system(size: 8.5, weight: .medium))
+                            }
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1.5)
+                            .background(Color.white.opacity(0.04))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.white.opacity(0.08), lineWidth: 0.5))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Đặt thư mục '\(asset.path.deletingLastPathComponent().lastPathComponent)' làm Folder Nguồn để bảo vệ, không bao giờ xóa file trong thư mục này.")
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -331,7 +383,7 @@ public struct VideoTwinClusterGroupCard: View {
                 .focusEffectDisabled()
                 .help("Mở vị trí tệp trong Finder")
                 
-                // Toggle Button (Xóa / Giữ)
+                // Toggle Button (Xóa / Giữ) - Cho phép chọn xóa video nguồn tự do, không khóa cứng
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         onToggleRemoval(asset.id)
@@ -340,18 +392,36 @@ public struct VideoTwinClusterGroupCard: View {
                     HStack(spacing: 4) {
                         Image(systemName: isMarkedForTrash ? "trash.fill" : "checkmark")
                             .font(.system(size: 9, weight: .bold))
-                        Text(isMarkedForTrash ? "Xóa" : "Giữ")
-                            .font(.system(size: 11, weight: .bold))
+                        if isSource && !isMarkedForTrash {
+                            Text("Giữ (Nguồn)")
+                                .font(.system(size: 11, weight: .bold))
+                        } else {
+                            Text(isMarkedForTrash ? "Xóa" : "Giữ")
+                                .font(.system(size: 11, weight: .bold))
+                        }
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 5)
-                    .background(isMarkedForTrash ? CFinderTheme.danger : Color.white.opacity(0.06))
-                    .foregroundStyle(isMarkedForTrash ? .white : Color(hex: "10B981"))
+                    .background(
+                        isMarkedForTrash
+                            ? CFinderTheme.danger
+                            : (isSource ? Color(hex: "06B6D4").opacity(0.18) : Color.white.opacity(0.06))
+                    )
+                    .foregroundStyle(
+                        isMarkedForTrash
+                            ? Color.white
+                            : (isSource ? Color(hex: "06B6D4") : Color(hex: "10B981"))
+                    )
                     .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        (isSource && !isMarkedForTrash)
+                            ? RoundedRectangle(cornerRadius: 6).stroke(Color(hex: "06B6D4").opacity(0.35), lineWidth: 1)
+                            : nil
+                    )
                 }
                 .buttonStyle(.plain)
                 .focusEffectDisabled()
-                .help(isMarkedForTrash ? "Bấm để giữ lại video này" : "Bấm để chọn xóa video này")
+                .help(isMarkedForTrash ? "Bấm để giữ lại video này" : (isSource ? "Video thuộc Folder Nguồn. Bấm nếu bạn muốn chọn xóa video này" : "Bấm để chọn xóa video này"))
             }
         }
         .padding(.horizontal, 14)

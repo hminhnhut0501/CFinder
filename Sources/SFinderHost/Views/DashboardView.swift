@@ -6,6 +6,7 @@ import SFinderCore
 public enum DashboardTab: String, CaseIterable, Identifiable {
     case overview = "overview"
     case permissions = "permissions"
+    case cleaner = "cleaner"
     case general = "general"
     case ocr = "ocr"
     case recorder = "recorder"
@@ -23,6 +24,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "Tổng quan"
         case .permissions: return "Quyền hệ thống"
+        case .cleaner: return "Dọn rác & Gỡ App"
         case .general: return "Cài đặt chung"
         case .ocr: return "Quét chữ OCR"
         case .recorder: return "Quay màn hình"
@@ -40,6 +42,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "Trung tâm điều khiển toàn bộ công cụ và trạng thái vận hành của CFinder"
         case .permissions: return "Kiểm tra và kích hoạt các quyền bảo mật macOS để ứng dụng hoạt động 100%"
+        case .cleaner: return "Dọn rác hệ thống, bộ nhớ đệm, tệp lớn và gỡ cài đặt ứng dụng tận gốc"
         case .general: return "Cấu hình khởi động cùng hệ điều hành, hiển thị Menu Bar và âm thanh thông báo"
         case .ocr: return "Tuỳ biến phím tắt toàn cục, gộp đoạn, xuất bảng tính TSV và mở URL tự động"
         case .recorder: return "Cấu hình quay video 60/120fps Retina, thu âm thanh máy tính, micro và hiệu ứng chuột"
@@ -57,6 +60,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return "square.grid.2x2.fill"
         case .permissions: return "hand.raised.fill"
+        case .cleaner: return "sparkles"
         case .general: return "gearshape.fill"
         case .ocr: return "text.viewfinder"
         case .recorder: return "record.circle.fill"
@@ -74,6 +78,7 @@ public enum DashboardTab: String, CaseIterable, Identifiable {
         switch self {
         case .overview: return CFinderTheme.FeatureColor.overview
         case .permissions: return CFinderTheme.FeatureColor.permissions
+        case .cleaner: return Color(hex: "06B6D4")
         case .general: return CFinderTheme.FeatureColor.general
         case .ocr: return CFinderTheme.FeatureColor.ocr
         case .recorder: return CFinderTheme.FeatureColor.recorder
@@ -176,7 +181,7 @@ public struct DashboardView: View {
                 Rectangle()
                     .fill(
                         LinearGradient(
-                            colors: [Color.white.opacity(0.15), Color.white.opacity(0.04), Color.clear],
+                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.07)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -205,11 +210,18 @@ public struct DashboardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color.black.opacity(0.08))
             }
+            .ignoresSafeArea()
         }
         .frame(width: 960, height: 650)
         .onAppear {
             ambientGlow = true
             refreshAllStatuses()
+            SystemMonitorEngine.shared.retainMonitoring()
+            NetworkMonitorEngine.shared.retainMonitoring()
+        }
+        .onDisappear {
+            SystemMonitorEngine.shared.releaseMonitoring()
+            NetworkMonitorEngine.shared.releaseMonitoring()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshAllStatuses()
@@ -250,6 +262,8 @@ public struct DashboardView: View {
                 launchAtLoginEnabled: launchAtLoginEnabled,
                 onRefresh: refreshAllStatuses
             )
+        case .cleaner:
+            CleanerTabContentView()
         case .ocr:
             OCRTabContentView(
                 currentPresetDisplay: $currentPresetDisplay,
@@ -326,7 +340,7 @@ struct DashboardSidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Traffic Light Safe Area
-            Spacer().frame(height: 38)
+            Spacer().frame(height: 44)
             
             // Minimal Brand Header
             HStack(spacing: 11) {
@@ -440,6 +454,7 @@ struct DashboardHeaderBar: View {
         switch selectedTab {
         case .overview: return "Tổng quan"
         case .permissions: return "Quyền hệ thống"
+        case .cleaner: return "Dọn rác & Gỡ ứng dụng tận gốc (CleanMyMac & AppCleaner)"
         case .general: return "Cài đặt chung"
         case .ocr: return "Quét chữ OCR"
         case .recorder: return "Ghi màn hình"
@@ -575,7 +590,8 @@ struct DashboardHeaderBar: View {
             .help("Cập nhật lại trạng thái")
         }
         .padding(.horizontal, 26)
-        .padding(.vertical, 14)
+        .padding(.top, 20)
+        .padding(.bottom, 14)
         .background(Color.white.opacity(0.015))
     }
 }

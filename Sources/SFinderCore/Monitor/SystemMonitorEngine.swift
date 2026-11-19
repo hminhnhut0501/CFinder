@@ -41,10 +41,10 @@ public final class SystemMonitorEngine: ObservableObject {
     // IOHID Function Pointers for Thermal
     private typealias IOHIDCreate = @convention(c) (CFAllocator?) -> Unmanaged<AnyObject>?
     private typealias IOHIDSetMatching = @convention(c) (AnyObject, CFDictionary) -> Void
-    private typealias IOHIDCopyServices = @convention(c) (AnyObject) -> CFArray?
-    private typealias IOHIDCopyEvent = @convention(c) (AnyObject, Int64, Int32, Int64) -> AnyObject?
+    private typealias IOHIDCopyServices = @convention(c) (AnyObject) -> Unmanaged<CFArray>?
+    private typealias IOHIDCopyEvent = @convention(c) (AnyObject, Int64, Int32, Int64) -> Unmanaged<AnyObject>?
     private typealias IOHIDGetFloat = @convention(c) (AnyObject, Int32) -> Double
-    private typealias IOHIDCopyProperty = @convention(c) (AnyObject, CFString) -> AnyObject?
+    private typealias IOHIDCopyProperty = @convention(c) (AnyObject, CFString) -> Unmanaged<CFTypeRef>?
     
     private var hidClient: AnyObject?
     private var hidSetMatching: IOHIDSetMatching?
@@ -53,14 +53,32 @@ public final class SystemMonitorEngine: ObservableObject {
     private var hidGetFloat: IOHIDGetFloat?
     private var hidCopyProperty: IOHIDCopyProperty?
     
+    private var activeObserverCount = 0
+    
     private init() {
         resolveHardwareInfo()
         setupThermalReader()
         sampleAllMetrics()
-        startMonitoring()
+        // Do not keep 1.5s timer running permanently in background.
+        // Runs on-demand via retainMonitoring() / releaseMonitoring().
     }
     
-    // MARK: - Lifecycle
+    // MARK: - Lifecycle & On-Demand Controls
+    
+    public func retainMonitoring() {
+        activeObserverCount += 1
+        if !isRunning {
+            sampleAllMetrics()
+            startMonitoring()
+        }
+    }
+    
+    public func releaseMonitoring() {
+        activeObserverCount = max(0, activeObserverCount - 1)
+        if activeObserverCount == 0 {
+            stopMonitoring()
+        }
+    }
     
     public func startMonitoring() {
         guard !isRunning else { return }
@@ -80,9 +98,7 @@ public final class SystemMonitorEngine: ObservableObject {
         guard isRunning else { return }
         
         timer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.sampleAllMetrics()
-            }
+            self?.sampleAllMetrics()
         }
     }
     
@@ -148,25 +164,28 @@ public final class SystemMonitorEngine: ObservableObject {
     // MARK: - Sampling
     
     public func sampleAllMetrics() {
-        let cpu = sampleCPU()
-        let gpu = sampleGPU()
-        let ram = sampleRAM()
-        
-        let newSnapshot = SystemMonitorSnapshot(
-            timestamp: Date(),
-            cpu: cpu,
-            gpu: gpu,
-            ram: ram
-        )
-        
-        self.snapshot = newSnapshot
-        
-        // Push History
-        appendHistory(&cpuHistory, value: cpu.totalUsage)
-        appendHistory(&gpuHistory, value: gpu.utilization)
-        appendHistory(&ramHistory, value: ram.usagePercentage)
-        appendHistory(&cpuTempHistory, value: cpu.temperature)
-        appendHistory(&gpuTempHistory, value: gpu.temperature)
+        autoreleasepool {
+            let temps = sampleTemperatures()
+            let cpu = sampleCPU(temperature: temps.cpu)
+            let gpu = sampleGPU(temperature: temps.gpu)
+            let ram = sampleRAM()
+            
+            let newSnapshot = SystemMonitorSnapshot(
+                timestamp: Date(),
+                cpu: cpu,
+                gpu: gpu,
+                ram: ram
+            )
+            
+            self.snapshot = newSnapshot
+            
+            // Push History
+            appendHistory(&cpuHistory, value: cpu.totalUsage)
+            appendHistory(&gpuHistory, value: gpu.utilization)
+            appendHistory(&ramHistory, value: ram.usagePercentage)
+            appendHistory(&cpuTempHistory, value: cpu.temperature)
+            appendHistory(&gpuTempHistory, value: gpu.temperature)
+        }
     }
     
     private func appendHistory(_ array: inout [Double], value: Double) {
@@ -178,12 +197,15 @@ public final class SystemMonitorEngine: ObservableObject {
     
     // MARK: - CPU Sampling
     
-    private func sampleCPU() -> SystemCPUStats {
+    private func sampleCPU(temperature: Double) -> SystemCPUStats {
+        let hostPort = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, hostPort) }
+        
         var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size)
         var info = host_cpu_load_info()
         let kr = withUnsafeMutablePointer(to: &info) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+                host_statistics(hostPort, HOST_CPU_LOAD_INFO, $0, &count)
             }
         }
         
@@ -221,7 +243,7 @@ public final class SystemMonitorEngine: ObservableObject {
         var cpuInfo: processor_info_array_t?
         var numCpuInfo: mach_msg_type_number_t = 0
         
-        let pKr = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO, &numCPUs, &cpuInfo, &numCpuInfo)
+        let pKr = host_processor_info(hostPort, PROCESSOR_CPU_LOAD_INFO, &numCPUs, &cpuInfo, &numCpuInfo)
         if pKr == KERN_SUCCESS, let cpuInfo = cpuInfo {
             var currentCoreTicks: [(user: UInt64, sys: UInt64, idle: UInt64, nice: UInt64)] = []
             
@@ -254,8 +276,6 @@ public final class SystemMonitorEngine: ObservableObject {
             vm_deallocate(mach_task_self_, vm_address_t(bitPattern: cpuInfo), deallocSize)
         }
         
-        let temps = sampleTemperatures()
-        
         return SystemCPUStats(
             totalUsage: min(100.0, max(0.0, totalUsage)),
             userUsage: min(100.0, max(0.0, userUsage)),
@@ -263,14 +283,14 @@ public final class SystemMonitorEngine: ObservableObject {
             idleUsage: min(100.0, max(0.0, idleUsage)),
             coreUsages: coreUsages,
             coreCount: Int(numCPUs),
-            temperature: temps.cpu,
+            temperature: temperature,
             modelName: chipModelName
         )
     }
     
     // MARK: - GPU Sampling
     
-    private func sampleGPU() -> SystemGPUStats {
+    private func sampleGPU(temperature: Double) -> SystemGPUStats {
         var devUtil: Double = 0
         var rendUtil: Double = 0
         var tileUtil: Double = 0
@@ -311,15 +331,13 @@ public final class SystemMonitorEngine: ObservableObject {
             IOObjectRelease(iterator)
         }
         
-        let temps = sampleTemperatures()
-        
         return SystemGPUStats(
             utilization: min(100.0, max(0.0, devUtil)),
             rendererUtilization: min(100.0, max(0.0, rendUtil)),
             tilerUtilization: min(100.0, max(0.0, tileUtil)),
             allocatedMemory: allocMem,
             inUseMemory: inUseMem,
-            temperature: temps.gpu,
+            temperature: temperature,
             modelName: "\(chipModelName) Graphics"
         )
     }
@@ -327,11 +345,14 @@ public final class SystemMonitorEngine: ObservableObject {
     // MARK: - RAM & Memory Pressure Sampling
     
     private func sampleRAM() -> SystemRAMStats {
+        let hostPort = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, hostPort) }
+        
         var count = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
         var vmStat = vm_statistics64()
         let kr = withUnsafeMutablePointer(to: &vmStat) {
             $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                host_statistics64(hostPort, HOST_VM_INFO64, $0, &count)
             }
         }
         
@@ -405,7 +426,11 @@ public final class SystemMonitorEngine: ObservableObject {
             return fallbackTemperatures()
         }
         
-        guard let services = copyServices(client) as? [AnyObject] else {
+        guard let unmanagedServices = copyServices(client) else {
+            return fallbackTemperatures()
+        }
+        let servicesArray = unmanagedServices.takeRetainedValue()
+        guard let services = servicesArray as? [AnyObject] else {
             return fallbackTemperatures()
         }
         
@@ -414,8 +439,13 @@ public final class SystemMonitorEngine: ObservableObject {
         var generalTemps: [Double] = []
         
         for service in services {
-            guard let name = copyProperty(service, "Product" as CFString) as? String else { continue }
-            guard let event = copyEvent(service, 15, 0, 0) else { continue }
+            guard let unmanagedName = copyProperty(service, "Product" as CFString) else { continue }
+            let nameObj = unmanagedName.takeRetainedValue()
+            let name = (nameObj as? String) ?? ""
+            guard !name.isEmpty else { continue }
+            
+            guard let unmanagedEvent = copyEvent(service, 15, 0, 0) else { continue }
+            let event = unmanagedEvent.takeRetainedValue()
             let temp = getFloat(event, 15 << 16)
             
             // Valid temperature range check

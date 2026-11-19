@@ -314,28 +314,61 @@ public final class FolderScanner: ObservableObject {
         var checked = 0
         var visualMatches = 0
         var lastPairUpdate = Date.distantPast
-        for pair in pairs {
-            try Task.checkCancellation()
-            await pauseToken.checkPause()
-            try Task.checkCancellation()
-            guard let a = byID[pair.assetAID], let b = byID[pair.assetBID] else { continue }
-            if Date().timeIntervalSince(lastPairUpdate) >= 0.1 {
-            let label = Self.compactPairActivity(a: a.path.lastPathComponent, b: b.path.lastPathComponent, current: checked + 1, total: pairs.count)
-            await MainActor.run {
-                self.activity = label
-                self.lastActivityAt = Date()
+        let maxMatchConcurrency = max(2, min(6, ProcessInfo.processInfo.activeProcessorCount))
+        let pause = await MainActor.run { self.pauseToken }
+        let assetMap = byID
+
+        try await withThrowingTaskGroup(of: MatchResult?.self) { group in
+            var nextIndex = 0
+            while nextIndex < min(maxMatchConcurrency, pairs.count) {
+                let pair = pairs[nextIndex]
+                nextIndex += 1
+                if let a = assetMap[pair.assetAID], let b = assetMap[pair.assetBID] {
+                    group.addTask {
+                        try Task.checkCancellation()
+                        await pause.checkPause()
+                        try Task.checkCancellation()
+                        return await matcher.match(assetA: a, assetB: b)
+                    }
+                }
             }
-            }
-            if let match = await matcher.match(assetA: a, assetB: b) { matches.append(match); visualMatches += 1 }
-            checked += 1
-            let count = checked, found = visualMatches
-            if Date().timeIntervalSince(lastPairUpdate) >= 0.1 || checked == pairs.count {
-            lastPairUpdate = Date()
-            await MainActor.run {
-                self.completedPairs = count
-                self.session.progress.nearDuplicates = found
-                self.lastActivityAt = Date()
-            }
+
+            while let result = try await group.next() {
+                if let match = result {
+                    matches.append(match)
+                    visualMatches += 1
+                }
+                checked += 1
+
+                if nextIndex < pairs.count {
+                    let pair = pairs[nextIndex]
+                    nextIndex += 1
+                    if let a = assetMap[pair.assetAID], let b = assetMap[pair.assetBID] {
+                        let label = Self.compactPairActivity(a: a.path.lastPathComponent, b: b.path.lastPathComponent, current: checked + 1, total: pairs.count)
+                        if Date().timeIntervalSince(lastPairUpdate) >= 0.1 {
+                            await MainActor.run {
+                                self.activity = label
+                                self.lastActivityAt = Date()
+                            }
+                        }
+                        group.addTask {
+                            try Task.checkCancellation()
+                            await pause.checkPause()
+                            try Task.checkCancellation()
+                            return await matcher.match(assetA: a, assetB: b)
+                        }
+                    }
+                }
+
+                let count = checked, found = visualMatches
+                if Date().timeIntervalSince(lastPairUpdate) >= 0.1 || checked == pairs.count {
+                    lastPairUpdate = Date()
+                    await MainActor.run {
+                        self.completedPairs = count
+                        self.session.progress.nearDuplicates = found
+                        self.lastActivityAt = Date()
+                    }
+                }
             }
         }
         await setPhase(.clustering)

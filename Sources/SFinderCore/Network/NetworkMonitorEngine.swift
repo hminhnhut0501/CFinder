@@ -42,18 +42,34 @@ public final class NetworkMonitorEngine: ObservableObject {
     private var isFetchingPublicIP: Bool = false
     private var lastPublicIPFetchTime: Date?
     
+    private var activeObserverCount = 0
+    
     private init() {
         setupPathMonitor()
         refreshLocalInterfaces()
         sampleThroughput()
-        startMonitoring()
-        
+        // On-demand monitoring: do not run 1.0s timer permanently in background
         Task {
             await fetchPublicIPInfo()
         }
     }
     
     // MARK: - Monitoring Controls
+    
+    public func retainMonitoring() {
+        activeObserverCount += 1
+        if !isMonitoring {
+            sampleThroughput()
+            startMonitoring()
+        }
+    }
+    
+    public func releaseMonitoring() {
+        activeObserverCount = max(0, activeObserverCount - 1)
+        if activeObserverCount == 0 {
+            stopMonitoring()
+        }
+    }
     
     public func startMonitoring() {
         guard !isMonitoring else { return }
@@ -83,53 +99,53 @@ public final class NetworkMonitorEngine: ObservableObject {
         guard isMonitoring else { return }
         
         timer = Timer.scheduledTimer(withTimeInterval: sampleInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.sampleThroughput()
-            }
+            self?.sampleThroughput()
         }
     }
     
     // MARK: - Periodic Sampling
     
     public func sampleThroughput() {
-        let now = Date()
-        let elapsed = max(0.2, now.timeIntervalSince(previousTimestamp))
-        let (currentIn, currentOut) = Self.readRawNetworkBytes()
-        
-        let deltaIn = currentIn >= previousBytesIn ? currentIn - previousBytesIn : 0
-        let deltaOut = currentOut >= previousBytesOut ? currentOut - previousBytesOut : 0
-        
-        previousBytesIn = currentIn
-        previousBytesOut = currentOut
-        previousTimestamp = now
-        
-        let inSpeed = Double(deltaIn) / elapsed
-        let outSpeed = Double(deltaOut) / elapsed
-        
-        let sessionTotalIn = currentIn >= baselineBytesIn ? currentIn - baselineBytesIn : 0
-        let sessionTotalOut = currentOut >= baselineBytesOut ? currentOut - baselineBytesOut : 0
-        
-        let newPeakDown = max(throughput.peakDownloadBytesPerSec, inSpeed)
-        let newPeakUp = max(throughput.peakUploadBytesPerSec, outSpeed)
-        
-        self.throughput = NetworkThroughputStats(
-            downloadBytesPerSec: inSpeed,
-            uploadBytesPerSec: outSpeed,
-            peakDownloadBytesPerSec: newPeakDown,
-            peakUploadBytesPerSec: newPeakUp,
-            totalDownloadedBytes: sessionTotalIn,
-            totalUploadedBytes: sessionTotalOut
-        )
-        
-        // Append history
-        downloadHistory.append(inSpeed)
-        if downloadHistory.count > maxHistoryCount {
-            downloadHistory.removeFirst(downloadHistory.count - maxHistoryCount)
-        }
-        
-        uploadHistory.append(outSpeed)
-        if uploadHistory.count > maxHistoryCount {
-            uploadHistory.removeFirst(uploadHistory.count - maxHistoryCount)
+        autoreleasepool {
+            let now = Date()
+            let elapsed = max(0.2, now.timeIntervalSince(previousTimestamp))
+            let (currentIn, currentOut) = Self.readRawNetworkBytes()
+            
+            let deltaIn = currentIn >= previousBytesIn ? currentIn - previousBytesIn : 0
+            let deltaOut = currentOut >= previousBytesOut ? currentOut - previousBytesOut : 0
+            
+            previousBytesIn = currentIn
+            previousBytesOut = currentOut
+            previousTimestamp = now
+            
+            let inSpeed = Double(deltaIn) / elapsed
+            let outSpeed = Double(deltaOut) / elapsed
+            
+            let sessionTotalIn = currentIn >= baselineBytesIn ? currentIn - baselineBytesIn : 0
+            let sessionTotalOut = currentOut >= baselineBytesOut ? currentOut - baselineBytesOut : 0
+            
+            let newPeakDown = max(throughput.peakDownloadBytesPerSec, inSpeed)
+            let newPeakUp = max(throughput.peakUploadBytesPerSec, outSpeed)
+            
+            self.throughput = NetworkThroughputStats(
+                downloadBytesPerSec: inSpeed,
+                uploadBytesPerSec: outSpeed,
+                peakDownloadBytesPerSec: newPeakDown,
+                peakUploadBytesPerSec: newPeakUp,
+                totalDownloadedBytes: sessionTotalIn,
+                totalUploadedBytes: sessionTotalOut
+            )
+            
+            // Append history
+            downloadHistory.append(inSpeed)
+            if downloadHistory.count > maxHistoryCount {
+                downloadHistory.removeFirst(downloadHistory.count - maxHistoryCount)
+            }
+            
+            uploadHistory.append(outSpeed)
+            if uploadHistory.count > maxHistoryCount {
+                uploadHistory.removeFirst(uploadHistory.count - maxHistoryCount)
+            }
         }
     }
     
