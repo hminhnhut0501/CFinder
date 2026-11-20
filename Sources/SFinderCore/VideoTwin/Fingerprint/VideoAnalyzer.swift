@@ -55,7 +55,6 @@ public struct VideoAnalyzer: Sendable {
         for frame in frames {
             try Task.checkCancellation()
             let (sample, normImg): (FrameSample?, CGImage?) = autoreleasepool {
-                guard !FrameSampler.isLowQualityFrame(frame.cgImage) else { return (nil, nil) }
                 let normalized = normalizer.normalize(frame.cgImage, isHDR: asset.metadata?.videoStream?.isHDR ?? false)
                 let normImg = normalized.image
                 guard !FrameSampler.isLowQualityFrame(normImg),

@@ -261,7 +261,6 @@ public final class FolderScanner: ObservableObject {
 
         await setPhase(.analyzing)
         var analyzedAssets: [VideoAsset] = []
-        var start = 0
         var analyzedCount = 0, failedCount = 0
         var lastAnalysisUpdate = Date.distantPast
 
@@ -269,26 +268,21 @@ public final class FolderScanner: ObservableObject {
         let assetsToAnalyze = newAssets.filter { exactLeaderMap[$0.id] == nil }
         var leaderAnalysisMap: [UUID: VideoAsset] = [:]
 
-        // Recheck thermal limits between batches.
-        while start < assetsToAnalyze.count {
-            let concurrency = min(8, max(2, await resourceController.recommendedDecodeWorkers()))
-            try Task.checkCancellation()
-            await pauseToken.checkPause()
-            try Task.checkCancellation()
-            let batch = Array(assetsToAnalyze[start..<min(start + concurrency, assetsToAnalyze.count)])
-            let results = await withTaskGroup(of: VideoAsset.self, returning: [VideoAsset].self) { group in
-                for asset in batch {
-                    group.addTask {
-                        await VideoAnalyzer().analyze(asset)
-                    }
+        // Continuous Work Pipeline (Zero Straggler Waiting):
+        // Maintain continuous worker stream. As soon as any worker completes an asset,
+        // immediately feed the next pending asset into the task group.
+        let workerConcurrency = min(8, max(2, await resourceController.recommendedDecodeWorkers()))
+        await withTaskGroup(of: VideoAsset.self) { group in
+            var nextIndex = 0
+            while nextIndex < min(workerConcurrency, assetsToAnalyze.count) {
+                let asset = assetsToAnalyze[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    await VideoAnalyzer().analyze(asset)
                 }
-                var results: [VideoAsset] = []
-                for await asset in group {
-                    results.append(asset)
-                }
-                return results
             }
-            for asset in results {
+            
+            while let asset = await group.next() {
                 if currentScanIDs.contains(asset.id) {
                     if !reusableIDs.contains(asset.id) { try? await storage.saveAnalysis(asset) }
                     analyzedCount += 1
@@ -298,16 +292,25 @@ public final class FolderScanner: ObservableObject {
                     leaderAnalysisMap[asset.id] = asset
                 }
                 analyzedAssets.append(asset)
-            }
-            start += batch.count
-            if Date().timeIntervalSince(lastAnalysisUpdate) >= 0.25 || start == assetsToAnalyze.count {
-                lastAnalysisUpdate = Date()
-                let count = analyzedCount, failed = failedCount
-                await MainActor.run {
-                    self.session.progress.totalAnalyzed = count
-                    self.session.progress.failedFiles = failed
-                    self.activity = "Analyzed \(count)/\(assetsToAnalyze.count) files"
-                    self.lastActivityAt = Date()
+                
+                // Immediately feed next asset to keep all workers 100% busy
+                if nextIndex < assetsToAnalyze.count {
+                    let nextAsset = assetsToAnalyze[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        await VideoAnalyzer().analyze(nextAsset)
+                    }
+                }
+                
+                if Date().timeIntervalSince(lastAnalysisUpdate) >= 0.2 || analyzedCount == assetsToAnalyze.count {
+                    lastAnalysisUpdate = Date()
+                    let count = analyzedCount, failed = failedCount
+                    await MainActor.run {
+                        self.session.progress.totalAnalyzed = count
+                        self.session.progress.failedFiles = failed
+                        self.activity = "Analyzed \(count)/\(assetsToAnalyze.count) files"
+                        self.lastActivityAt = Date()
+                    }
                 }
             }
         }
@@ -356,7 +359,7 @@ public final class FolderScanner: ObservableObject {
         var checked = 0
         var visualMatches = 0
         var lastPairUpdate = Date.distantPast
-        let maxMatchConcurrency = max(2, min(6, ProcessInfo.processInfo.activeProcessorCount))
+        let maxMatchConcurrency = max(4, min(16, ProcessInfo.processInfo.activeProcessorCount * 2))
         let pause = await MainActor.run { self.pauseToken }
         let assetMap = byID
 

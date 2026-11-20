@@ -180,6 +180,9 @@ public struct FrameNormalizer: Sendable {
         return sum
     }
 
+    // MARK: - Shared GPU Acceleration
+    private static let sharedCIContext = CIContext(options: [.useSoftwareRenderer: false, .priorityRequestLow: false])
+
     // MARK: - Image operations
 
     private func applyRotation(_ image: CGImage, degrees: Double) -> CGImage? {
@@ -187,8 +190,7 @@ public struct FrameNormalizer: Sendable {
         let ciImage = CIImage(cgImage: image)
         let transform = CGAffineTransform(rotationAngle: radians)
         let rotated = ciImage.transformed(by: transform)
-        let ctx = CIContext()
-        return ctx.createCGImage(rotated, from: rotated.extent)
+        return Self.sharedCIContext.createCGImage(rotated, from: rotated.extent)
     }
 
     private func cropImage(_ image: CGImage, to rect: CGRect) -> CGImage? {
@@ -197,7 +199,6 @@ public struct FrameNormalizer: Sendable {
 
     private func toneMapHDR(_ image: CGImage) -> CGImage? {
         // Simple tone map: apply gamma 2.2 approximation
-        // For proper HDR: use Metal shader or vImage HDR processing
         let ciImage = CIImage(cgImage: image)
         let filter = CIFilter(name: "CIToneCurve")
         filter?.setValue(ciImage, forKey: kCIInputImageKey)
@@ -208,8 +209,7 @@ public struct FrameNormalizer: Sendable {
         filter?.setValue(CIVector(x: 0.75, y: 0.80), forKey: "inputPoint3")
         filter?.setValue(CIVector(x: 1, y: 1), forKey: "inputPoint4")
         guard let output = filter?.outputImage else { return nil }
-        let ctx = CIContext()
-        return ctx.createCGImage(output, from: output.extent)
+        return Self.sharedCIContext.createCGImage(output, from: output.extent)
     }
 
     private func normalizeColorSpace(_ image: CGImage) -> CGImage? {

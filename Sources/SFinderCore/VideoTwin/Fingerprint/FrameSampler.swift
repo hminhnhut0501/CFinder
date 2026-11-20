@@ -123,7 +123,7 @@ public actor FrameSampler {
 
     func sample(at timestamps: [Double], from url: URL, duration: Double, normalizer: FrameNormalizer) async -> [SampledFrame] {
         guard duration > 0, !timestamps.isEmpty else { return [] }
-        return await decodeFrames(from: url, at: timestamps, positions: timestamps.map { $0 / duration }, normalizer: normalizer)
+        return await decodeFrames(from: url, at: timestamps, positions: timestamps.map { $0 / duration }, normalizer: normalizer, isRefinedSeek: true)
     }
 
     // MARK: - Decoder
@@ -132,15 +132,21 @@ public actor FrameSampler {
         from url: URL,
         at timestamps: [Double],
         positions: [Double],
-        normalizer: FrameNormalizer
+        normalizer: FrameNormalizer,
+        isRefinedSeek: Bool = false
     ) async -> [SampledFrame] {
         let avAsset = AVURLAsset(url: url)
 
         let generator = AVAssetImageGenerator(asset: avAsset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 256, height: 256)
+        
+        // Smart keyframe-seeking tolerance:
+        // For coarse/initial sampling, allow broader tolerance (up to 2.5s) to let AVFoundation
+        // snap directly to the nearest clean I-frame (Keyframe) instantly without decoding B/P chains.
+        // For refined timeline alignment, use strict tolerance.
         let step = timestamps.count > 1 ? (timestamps.last! - timestamps.first!) / Double(timestamps.count) : 2.0
-        let tolSec = min(0.8, max(0.08, step * 0.4))
+        let tolSec = isRefinedSeek ? min(0.5, max(0.08, step * 0.25)) : min(2.5, max(0.8, step * 0.45))
         let tolerance = CMTime(seconds: tolSec, preferredTimescale: 600)
         generator.requestedTimeToleranceBefore = tolerance
         generator.requestedTimeToleranceAfter = tolerance
