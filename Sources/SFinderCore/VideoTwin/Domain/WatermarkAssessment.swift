@@ -19,14 +19,47 @@ public struct WatermarkEvidence: Codable, Hashable, Sendable, Identifiable {
 public struct WatermarkAssessment: Codable, Hashable, Sendable {
     public enum Status: String, Codable, Sendable { case detected, possible, noEvidence, unavailable }
     public let status: Status
-    public let peerID: UUID
+    public let peerID: UUID?
     public let checkedFrames: Int
     public let supportingFrames: Int
     public let evidence: [WatermarkEvidence]
     public let explanation: String
     public let comparableAlternative: Bool
-    public var dismissed = false
-    public var penalty: Float { status == .detected && !dismissed ? 45 : 0 }
+    public var dismissed: Bool
+    public var watermarkCount: Int
+    public var detectedRegions: [String]
+    
+    public init(
+        status: Status,
+        peerID: UUID? = nil,
+        checkedFrames: Int,
+        supportingFrames: Int,
+        evidence: [WatermarkEvidence],
+        explanation: String,
+        comparableAlternative: Bool,
+        dismissed: Bool = false,
+        watermarkCount: Int = 0,
+        detectedRegions: [String] = []
+    ) {
+        self.status = status
+        self.peerID = peerID
+        self.checkedFrames = checkedFrames
+        self.supportingFrames = supportingFrames
+        self.evidence = evidence
+        self.explanation = explanation
+        self.comparableAlternative = comparableAlternative
+        self.dismissed = dismissed
+        self.watermarkCount = watermarkCount
+        self.detectedRegions = detectedRegions
+    }
+    
+    public var penalty: Float {
+        guard status == .detected && !dismissed else { return 0 }
+        if watermarkCount > 0 {
+            return Float(min(60, watermarkCount * 18))
+        }
+        return 45
+    }
 }
 
 public enum WatermarkPolicy {

@@ -50,31 +50,28 @@ public actor BestCopyRecommender {
 
         guard !evaluatedMembers.isEmpty else { return cluster }
 
-        let memberIDs = Set(evaluatedMembers.map { $0.asset.id })
         let longestDuration = evaluatedMembers.compactMap { $0.asset.metadata?.durationSeconds }.max() ?? 0
-        let cleanIDs = Set(evaluatedMembers.compactMap { item -> UUID? in
-            guard let mark = item.asset.watermark, mark.status == .detected, !mark.dismissed,
-                  mark.comparableAlternative, memberIDs.contains(mark.peerID), let peer = assets[mark.peerID],
-                  peer.watermark?.status != .detected,
-                  (peer.metadata?.durationSeconds ?? 0) >= longestDuration * 0.98 else { return nil }
-            return peer.id
-        })
+        
+        func watermarkCount(_ item: (member: ClusterMember, asset: VideoAsset, metrics: QualityMetrics)) -> Int {
+            guard let mark = item.asset.watermark, mark.status == .detected, !mark.dismissed else { return 0 }
+            return max(1, mark.watermarkCount)
+        }
+        
         func score(_ item: (member: ClusterMember, asset: VideoAsset, metrics: QualityMetrics)) -> Float {
-            guard let mark = item.asset.watermark, cleanIDs.contains(mark.peerID) else { return item.metrics.overallScore }
-            return max(0, item.metrics.overallScore - mark.penalty)
+            var s = item.metrics.overallScore
+            if let mark = item.asset.watermark, mark.status == .detected, !mark.dismissed {
+                s -= mark.penalty
+            }
+            return max(0, s)
         }
 
         // TIERED SORTING:
         // Tier 0: Content Completeness Check (Bảo vệ bản đầy đủ, không bao giờ ưu tiên clip cắt ngắn)
         // Tier 1: Dominant Resolution Check (e.g. 1080p vs 720p, 4K vs 1080p)
-        // Tier 2: Composite Quality Score (Resolution + Resolution-Aware Bitrate + Codec)
+        // Tier 1.5: Watermark Cleanliness Check (Ưu tiên bản sạch không dán logo/watermark khi độ phân giải tương đương)
+        // Tier 2: Composite Quality Score (Resolution + Resolution-Aware Bitrate + Codec - Watermark Penalty)
         // Tier 3: Effective Bitrate (Higher Bitrate wins when resolutions are identical)
         evaluatedMembers.sort { a, b in
-            // Clean watermark priority
-            if cleanIDs.contains(a.asset.id) != cleanIDs.contains(b.asset.id) {
-                return cleanIDs.contains(a.asset.id)
-            }
-            
             let pixA = pixelCount(a)
             let pixB = pixelCount(b)
             let durA = a.asset.metadata?.durationSeconds ?? 0
@@ -104,7 +101,14 @@ public actor BestCopyRecommender {
                 }
             }
             
-            // Tier 2: Composite Quality Score
+            // Tier 1.5: Clean Watermark Check (Bản sạch ít logo/watermark hơn thắng khi cùng độ phân giải)
+            let wmA = watermarkCount(a)
+            let wmB = watermarkCount(b)
+            if wmA != wmB && durA >= longestDuration * 0.90 && durB >= longestDuration * 0.90 {
+                return wmA < wmB
+            }
+            
+            // Tier 2: Composite Quality Score (đã trừ điểm watermark)
             let scoreA = score(a)
             let scoreB = score(b)
             if abs(scoreA - scoreB) > 0.5 {
@@ -127,7 +131,7 @@ public actor BestCopyRecommender {
         for i in 1..<evaluatedMembers.count {
             let candidate = evaluatedMembers[i]
             let diff = score(best) - score(candidate)
-            if cleanIDs.contains(best.asset.id) && !cleanIDs.contains(candidate.asset.id) { continue }
+            if watermarkCount(best) < watermarkCount(candidate) { continue }
             
             // If best has significantly longer duration, candidate can NEVER overturn it!
             let durBest = best.asset.metadata?.durationSeconds ?? 0

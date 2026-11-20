@@ -77,8 +77,14 @@ public final class MatchEngine: Sendable {
         let ratio = min(durationA, durationB) / max(durationA, durationB, 0.001)
 
         // Stage 1: Coarse dHash (full + center-safe) — early reject only for equal-duration pairs
-        let (coarseScore, coarseFrameScores) = coarseDHashScore(assetA: assetA, assetB: assetB)
-        if let _ = earlyReject(frameScores: coarseFrameScores), ratio >= Double(config.durationRatioMin) {
+        var (coarseScore, coarseFrameScores) = coarseDHashScore(assetA: assetA, assetB: assetB)
+        if ratio < Double(config.durationRatioMin) {
+            // For split segments / skewed durations (Part 1, Part 2, Part 3...),
+            // sequential frame-by-frame comparison is invalid because Part 2 starts mid-movie.
+            // Check cross-frame similarity instead.
+            let crossScore = crossFrameDHashScore(assetA: assetA, assetB: assetB)
+            coarseScore = max(coarseScore, crossScore)
+        } else if let _ = earlyReject(frameScores: coarseFrameScores) {
             logger.debug("Early reject: \(assetA.path.lastPathComponent) vs \(assetB.path.lastPathComponent), coarse=\(coarseScore)")
             return nil
         }
@@ -357,6 +363,21 @@ public final class MatchEngine: Sendable {
 
         let avg = frameScores.isEmpty ? 0 : frameScores.reduce(0, +) / Float(frameScores.count)
         return (avg, frameScores)
+    }
+
+    private func crossFrameDHashScore(assetA: VideoAsset, assetB: VideoAsset) -> Float {
+        let fpsA = assetA.fingerprints.compactMap { $0.visualFingerprint }
+        let fpsB = assetB.fingerprints.compactMap { $0.visualFingerprint }
+        guard !fpsA.isEmpty, !fpsB.isEmpty else { return 0 }
+
+        var maxSim: Float = 0
+        for a in fpsA {
+            for b in fpsB {
+                let sim = frameDHashSimilarity(a, b)
+                if sim > maxSim { maxSim = sim }
+            }
+        }
+        return maxSim
     }
 
     private func earlyReject(frameScores: [Float]) -> Bool? {

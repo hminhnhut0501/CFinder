@@ -415,42 +415,11 @@ public final class FolderScanner: ObservableObject {
         }
         await setPhase(.clustering)
         await MainActor.run { self.activity = "Grouping matches and recommending best copies" }
-        let watermarkAnalyzer = WatermarkAnalyzer()
         let dismissedWatermarks = await MainActor.run { Set(UserDefaults.standard.stringArray(forKey: "dismissedWatermarkFiles") ?? []) }
-        for id in byID.keys { byID[id]?.watermark = nil }
-        // Limit watermark overlay examination to near-duplicate candidate pairs with identical resolution tiers
-        // (if resolution differs >= 15%, dominant resolution already decides best copy without needing slow OCR)
-        let nonExactMatches = matches.filter { match in
-            guard match.matchType != .exact,
-                  let a = byID[match.assetAID],
-                  let b = byID[match.assetBID],
-                  let pixA = a.metadata?.videoStream.map({ $0.displayWidth * $0.displayHeight }),
-                  let pixB = b.metadata?.videoStream.map({ $0.displayWidth * $0.displayHeight }),
-                  pixA > 0, pixB > 0 else { return false }
-            let maxPix = max(pixA, pixB), minPix = min(pixA, pixB)
-            return Double(maxPix) < Double(minPix) * 1.15
-        }
-        let matchesToExamine = Array(nonExactMatches.prefix(20))
-
-        for match in matchesToExamine {
-            try Task.checkCancellation()
-            await pauseToken.checkPause()
-            guard let a = byID[match.assetAID], let b = byID[match.assetBID] else { continue }
-            let overlayName = Self.truncateFilename(a.path.lastPathComponent, maxLen: 18)
-            await MainActor.run { self.activity = "Kiểm tra chi tiết: \(overlayName)"; self.lastActivityAt = Date() }
-            do {
-                if let (assessmentA, assessmentB) = try await watermarkAnalyzer.analyze(a, b, match: match) {
-                    for (asset, raw) in [(a, assessmentA), (b, assessmentB)] {
-                        var assessment = raw
-                        assessment.dismissed = dismissedWatermarks.contains(WatermarkPolicy.dismissalKey(asset))
-                        let rank: [WatermarkAssessment.Status: Int] = [.unavailable: 0, .noEvidence: 1, .possible: 2, .detected: 3]
-                        if (rank[assessment.status] ?? 0) >= (rank[byID[asset.id]?.watermark?.status ?? .unavailable] ?? 0) {
-                            byID[asset.id]?.watermark = assessment
-                        }
-                    }
-                }
-            } catch {
-                logger.warning("Watermark analysis skipped for pair: \(error)")
+        for id in byID.keys {
+            if var mark = byID[id]?.watermark, let asset = byID[id] {
+                mark.dismissed = dismissedWatermarks.contains(WatermarkPolicy.dismissalKey(asset))
+                byID[id]?.watermark = mark
             }
         }
         for asset in byID.values { try await storage.saveAnalysis(asset) }

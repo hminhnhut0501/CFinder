@@ -92,13 +92,14 @@ public actor CandidateGenerator {
                 if let zd = sample.visualFingerprint?.zoomDHash { list.append(zd) }
                 return list
             }
-            let distanceThreshold = partialOnly ? config.coarseCandidateDistance + 4 : config.coarseCandidateDistance + 2
+            let distanceThreshold = partialOnly ? config.coarseCandidateDistance + 6 : config.coarseCandidateDistance + 2
             var visited = Set<UUID>()
+            let neighborLimit = partialOnly ? config.maxCandidatesPerAsset * 2 : config.maxCandidatesPerAsset
             // Bound total neighbors per asset, including multi-frame queries.
             for hash in hashes {
-                if visited.count >= config.maxCandidatesPerAsset { break }
-                let neighbors = await index.nearest(to: hash, limit: config.maxCandidatesPerAsset)
-                for id in neighbors where visited.count < config.maxCandidatesPerAsset && !visited.contains(id) {
+                if visited.count >= neighborLimit { break }
+                let neighbors = await index.nearest(to: hash, limit: neighborLimit)
+                for id in neighbors where visited.count < neighborLimit && !visited.contains(id) {
                     visited.insert(id)
                     guard let other = byID[id], compatible(asset, other, partialOnly: partialOnly),
                           other.fingerprints.contains(where: { sample in

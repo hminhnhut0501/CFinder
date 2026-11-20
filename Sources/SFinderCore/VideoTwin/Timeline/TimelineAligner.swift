@@ -26,7 +26,10 @@ public actor TimelineAligner {
 
     func align(framesA: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)], framesB: [(timestamp: Double, dHash: UInt64, centerDHash: UInt64?, zoomDHash: UInt64?)], durationA: Double, durationB: Double) -> AlignmentResult? {
         let minRequired = min(3, config.minimumAlignedSamples)
-        guard framesA.count >= minRequired, framesB.count >= minRequired,
+        let durRatio = min(durationA, durationB) / max(durationA, durationB)
+        let isDurationSkewed = durRatio < Double(config.durationRatioMin)
+        let effectiveMinRequired = isDurationSkewed ? 1 : minRequired
+        guard framesA.count >= effectiveMinRequired, framesB.count >= effectiveMinRequired,
               durationA.isFinite, durationB.isFinite, durationA > 0, durationB > 0 else { return nil }
         let a = framesA.filter { $0.timestamp.isFinite }.sorted { $0.timestamp < $1.timestamp }
         let b = framesB.filter { $0.timestamp.isFinite }.sorted { $0.timestamp < $1.timestamp }
@@ -71,8 +74,12 @@ public actor TimelineAligner {
                 scores.append(similarity)
                 deltas.append(b[index].timestamp - left.timestamp)
             }
-            guard scores.count >= minRequired else { continue }
+            guard scores.count >= effectiveMinRequired else { continue }
             let average = scores.reduce(0, +) / Float(scores.count)
+            // When skewed (e.g. split parts), require higher confidence for small sample matches
+            if isDurationSkewed && scores.count < minRequired {
+                guard average >= 0.80 else { continue }
+            }
             deltas.sort()
             let refined = deltas[deltas.count / 2]
             if best == nil || scores.count > best!.count ||

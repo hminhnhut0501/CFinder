@@ -25,6 +25,7 @@ public struct VideoAnalyzer: Sendable {
         do {
             let evidence = try await Self.fingerprintBatch(asset, level: .coarse)
             asset.fingerprints = evidence.samples
+            asset.watermark = evidence.watermark
             asset.quality = await QualityAnalyzer().analyze(asset: asset)
             asset.analysisState = evidence.decodedCount == 0 ? .failed : .qualityAnalyzed
             asset.errorState = evidence.decodedCount == 0 ? .decodeFailed : (asset.fingerprints.count < SimilarityConfiguration.default.minimumAlignedSamples ? .insufficientVisualEvidence : nil)
@@ -42,26 +43,28 @@ public struct VideoAnalyzer: Sendable {
         try await fingerprintBatch(asset, level: level, times: times).samples
     }
 
-    private static func fingerprintBatch(_ asset: VideoAsset, level: FrameSampler.SamplingLevel, times: [Double]? = nil) async throws -> (samples: [FrameSample], decodedCount: Int) {
+    private static func fingerprintBatch(_ asset: VideoAsset, level: FrameSampler.SamplingLevel, times: [Double]? = nil) async throws -> (samples: [FrameSample], decodedCount: Int, watermark: WatermarkAssessment?) {
         let duration = asset.metadata?.durationSeconds ?? 0
         let sampler = FrameSampler(), normalizer = FrameNormalizer()
         let frames: [FrameSampler.SampledFrame]
         if let times { frames = await sampler.sample(at: times, from: asset.path, duration: duration, normalizer: normalizer) }
         else { frames = await sampler.sampleFrames(from: asset.path, duration: duration, level: level, normalizer: normalizer) }
         var samples: [FrameSample] = []
+        var normImages: [CGImage] = []
+        var frameTimes: [Double] = []
         for frame in frames {
             try Task.checkCancellation()
-            let sample: FrameSample? = autoreleasepool {
-                guard !FrameSampler.isLowQualityFrame(frame.cgImage) else { return nil }
+            let (sample, normImg): (FrameSample?, CGImage?) = autoreleasepool {
+                guard !FrameSampler.isLowQualityFrame(frame.cgImage) else { return (nil, nil) }
                 let normalized = normalizer.normalize(frame.cgImage, isHDR: asset.metadata?.videoStream?.isHDR ?? false)
                 let normImg = normalized.image
                 guard !FrameSampler.isLowQualityFrame(normImg),
                       let d = DHasher.hash(normImg),
-                      let p = PHasher.hash(normImg) else { return nil }
+                      let p = PHasher.hash(normImg) else { return (nil, nil) }
 
                 let (centerD, centerP, zoomD, zoomP, gridP) = Self.extractRegionalFingerprints(from: normImg)
 
-                return FrameSample(
+                let s = FrameSample(
                     id: UUID(),
                     assetID: asset.id,
                     position: frame.position,
@@ -81,12 +84,18 @@ public struct VideoAnalyzer: Sendable {
                     sharpness: SharpnessAnalyzer.score(normImg),
                     normalizationVersion: "v2"
                 )
+                return (s, normImg)
             }
             if let sample {
                 samples.append(sample)
+                if let normImg {
+                    normImages.append(normImg)
+                    frameTimes.append(frame.timestampSeconds)
+                }
             }
         }
-        return (samples, frames.count)
+        let watermark = FastWatermarkDetector.detect(from: normImages, timestamps: frameTimes)
+        return (samples, frames.count, watermark)
     }
 
     /// Computes center safe-region hashes, zoom/crop hashes (~1.4x-1.8x zoom or 9:16 vertical crop),

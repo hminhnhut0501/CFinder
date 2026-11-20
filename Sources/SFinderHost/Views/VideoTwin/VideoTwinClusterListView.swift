@@ -161,13 +161,36 @@ public struct VideoTwinClusterGroupCard: View {
                 .foregroundStyle(CFinderTheme.textMuted)
             
             let isCropped = cluster.representativeMatchType == .croppedVariant
-            Image(systemName: isExact ? "checkmark.seal.fill" : (isCropped ? "crop" : "sparkles.tv"))
-                .font(.system(size: 11))
-                .foregroundStyle(isExact ? CFinderTheme.success : (isCropped ? Color(hex: "A855F7") : CFinderTheme.primaryLight))
+            let isSegment = cluster.representativeMatchType == .containedClip || cluster.representativeMatchType == .partialMatch
             
-            Text(isExact ? "Trùng 100%" : (isCropped ? "Crop / Zoom khung hình" : "Trùng nội dung"))
+            let headerIcon: String = {
+                if isExact { return "checkmark.seal.fill" }
+                if isCropped { return "crop" }
+                if isSegment { return "puzzlepiece.extension.fill" }
+                return "sparkles.tv"
+            }()
+            
+            let headerColor: Color = {
+                if isExact { return CFinderTheme.success }
+                if isCropped { return Color(hex: "A855F7") }
+                if isSegment { return Color(hex: "38BDF8") }
+                return CFinderTheme.primaryLight
+            }()
+            
+            let headerTitle: String = {
+                if isExact { return "Trùng 100%" }
+                if isCropped { return "Crop / Zoom khung hình" }
+                if isSegment { return "Đoạn cắt / Phân đoạn (Part)" }
+                return "Trùng nội dung"
+            }()
+            
+            Image(systemName: headerIcon)
+                .font(.system(size: 11))
+                .foregroundStyle(headerColor)
+            
+            Text(headerTitle)
                 .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(isCropped ? Color(hex: "A855F7") : CFinderTheme.textPrimary)
+                .foregroundStyle(isExact ? CFinderTheme.textPrimary : headerColor)
             
             if !isExact {
                 Text(String(format: "%.0f%% tương đồng", cluster.overallSimilarity * 100))
@@ -287,6 +310,40 @@ public struct VideoTwinClusterGroupCard: View {
                         .padding(.vertical, 1)
                         .background(Color(hex: "10B981").opacity(0.15))
                         .clipShape(Capsule())
+                    }
+                    
+                    // Segment / Clip Part Badge
+                    if diff.durationDiffers && diff.maxDuration > 0 && durationSec > 0 && durationSec <= diff.maxDuration * 0.85 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "puzzlepiece.extension.fill")
+                                .font(.system(size: 7))
+                            Text("Đoạn cắt")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundStyle(Color(hex: "38BDF8"))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color(hex: "38BDF8").opacity(0.18))
+                        .clipShape(Capsule())
+                        .help("Video này là một phân đoạn (clip con) được cắt từ video đầy đủ")
+                    }
+                    
+                    // Watermark / Logo Badge
+                    if let wm = asset.watermark, wm.status == .detected, !wm.dismissed {
+                        let count = max(1, wm.watermarkCount)
+                        let regions = wm.detectedRegions.isEmpty ? "" : " (\(wm.detectedRegions.joined(separator: ", ")))"
+                        HStack(spacing: 3) {
+                            Image(systemName: "tag.fill")
+                                .font(.system(size: 7))
+                            Text(count > 1 ? "\(count) Watermark" : "Watermark")
+                                .font(.system(size: 9, weight: .bold))
+                        }
+                        .foregroundStyle(Color(hex: "F59E0B"))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color(hex: "F59E0B").opacity(0.18))
+                        .clipShape(Capsule())
+                        .help("Phát hiện \(count) watermark / logo tĩnh\(regions)")
                     }
                 }
                 
